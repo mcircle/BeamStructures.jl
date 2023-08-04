@@ -1,5 +1,4 @@
 
-
 abstract type Boundary end
 struct Clamp <: Boundary end
 struct Branch <: Boundary end
