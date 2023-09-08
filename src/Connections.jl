@@ -1,11 +1,3 @@
-
-abstract type Boundary end
-struct Clamp <: Boundary end
-struct Branch <: Boundary end
-struct Free <: Boundary end
-struct Slider <: Boundary end
-struct Input <: Boundary end
-
 const startof = 1
 const endof  = 2
 

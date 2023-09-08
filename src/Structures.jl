@@ -59,6 +59,13 @@ function initialize_boundary(::Boundary,node,forces::AbstractVector{T},positions
     return [m,θ0 + θs,x/l,y/l,fx,fy,κ*l]
 end
 
+function initialize_boundary(node::Boundary,forces::AbstracVector{T},beam::Beam) where {T}
+    x,y,θ0 = node.x,node.y,node.θs
+    l,θs,κ = beam.l,beam.θs,beam.κ0
+    m,fx,fy = forces .* [l,l^2,l^2] #am Balkenelement
+    return [m,θ0 + θs,x/l,y/l,fx,fy,κ*l]
+end 
+
 function initialize_boundary(::Branch,node,forces::AbstractVector{T},positions::AbstractVector{T},nodefeatures,beamfeatures = zeros(T,4)) where {T} 
     θ0,x,y = T.(nodefeatures[1:3,node]) #Grundposition des Knotens 
     l,θs,κ = beamfeatures[1:3]
@@ -125,7 +132,7 @@ end
 function residuals!(res::AbstractVector{T},::Boundary,beams,y,features,beamfeatures,ind) where{T}
     #Forces and positions are important
     for (beam,point) in beams
-        l,θe =beamfeatures[[1,4],beam]
+        l,θe =beamfeatures[[1,point*2],beam]
         res = @view res[ind:ind+2]
         res .= features[4:6] .+ getsign(point) .* y[point][[1,5,6],beam] ./ [l,l^2,l^2]
         # @show res
@@ -136,7 +143,7 @@ end
 function residuals!(res::AbstractVector{T},::Clamp,beams,y,features,beamfeatures,ind) where{T}
     #Positions are important
     for (beam,point) in beams
-            l,θe =beamfeatures[[1,4],beam]
+            l,θe =beamfeatures[[1,point*2],beam]
             res_ = @view res[ind:ind+2]
             res_ .= features[1:3] .- y[point][2:4,beam] .* [1,l,l]
             res_[1] += θe
@@ -158,13 +165,13 @@ function residuals!( residuals,str::Structure,y::EnsembleSolution{T,3,Vector{Mat
 end 
 
 function loss!(residuals,structure,parameters)
-    inits = initialize(str,parameters,features,beamfeatures) 
+    inits = initialize(structure,parameters,features,beamfeatures) 
     odesol = structure(inits,false)   
-    residuals!(residuals,str,odesol,features,beamfeatures)
+    residuals!(residuals,structure,odesol,features,beamfeatures)
 end
 function loss!(residuals,structure,parameters,features,beamfeatures)
-    inits = initialize(str,parameters,features,beamfeatures) 
+    inits = initialize(structure,parameters,features,beamfeatures) 
     odesol = structure(inits,false)   
-    residuals!(residuals,str,odesol,features,beamfeatures)
+    residuals!(residuals,structure,odesol,features,beamfeatures)
 end
 
