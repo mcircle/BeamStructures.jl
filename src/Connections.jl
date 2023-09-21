@@ -4,13 +4,13 @@ const endof  = 2
 struct Connections{OT,A<:Dict{Int,Vector},N<:Dict{Int,Vector{Pair}},B<:Dict{Int,Pair},T<:Dict{Int,Boundary}} <: AbstractMatrix{OT}
     #"Adjacencematrix"
     AdjMat::A
-    Nodes::N # stores Nodes connected to Beam and at which end
-    Beams::B # stores Beams connected to Nodes at start/end
-    NodeType::T
+    Nodes2Beams::N # stores Nodes connected to Beam and at which end
+    Beams2Nodes::B # stores Beams connected to Nodes at start/end
+    Nodes::T
 end 
 
 function get_branches(con::Connections)
-    br = findall(x->isa(con.NodeType[x],Branch),1:length(con.NodeType))
+    br = findall(x->isa(con.Nodes[x],Branch),1:length(con.Nodes))
     count_br = length(br)
     Dict([br[x] => x for x in 1:count_br])
 end 
@@ -35,13 +35,16 @@ function Connections(adj::AbstractMatrix{T},tps) where{T}
             b +=1
         end 
     end 
-
     Connections{T,typeof(adjmat),typeof(nodes),typeof(Beams),typeof(tps)}(adjmat,nodes,Beams,tps)
+end 
+
+function Connections(adj::AbstractMatrix,tps...)
+    Connections(adj,Dict(x=>y for (x,y) in enumerate(tps)))
 end 
 
 function incidence(con::Connections)
     #each row = Node 
-    mat = zeros(eltype(con),length(con.Nodes),length(con.Beams))
+    mat = zeros(eltype(con),length(con.Nodes2Beams),length(con.Beams2Nodes))
     for (b,(st,en)) in con.Beams
         mat[[st,en],b] .= 1
     end 
