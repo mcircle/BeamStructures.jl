@@ -14,12 +14,14 @@ E = 2e11
 h = 2.e-3
 w = 10.e-3
 Iz = w*h^3/12
+
 beam1 = Beam(100e-3,h,w,0.)
 beam2 = Beam(100e-3,h,w,0.)
 beam3 = Beam(100e-3,h,w,0.,θs = π/2)
 beam4 = Beam(100e-3,h,w,0.,θs = π/2)
 beam5 = Beam(100e-3,h,w,0.)
 beam6 = Beam(40e-3,h,w,0., θs = 0.,)
+
 ΔFy = 100. 
 ΔFx = 100. 
     #            node   1    2       3       4       5
@@ -32,15 +34,17 @@ nodefeatures = collect([0.   0.      0.      0.     0.     π/4; # Drehung des N
 ]')
 #adjacence matrix defining the connected nodes
 # node 1 2 3 4 5  node
-no1 = Clamp(zeros(Float64,6)...)
+no1 = CompliantClamp(zeros(Float64,5)...,100.)
+@time fieldnames(typeof(no1))
 no2 = Branch(100e-3,0.,0.,0.,0.,0.)
 no3 = Branch(200e-3,0.,0.,100.,-100.,0.)
 no4 = Branch(100e-3,100e-3,0.,-100.,100.,0.)
 no5 = Branch(200e-3,100e-3,0.,0.,0.,10.)
 no6 = Free(240e-3,100e-3,0.,0.,0.,0.)
 
-#closed chain 
+test = loaddatabase() 
 
+#closed chain 
 adj =[ 0 1 0 0 0 0; #1
        1 0 1 1 0 0; #2
        0 1 0 0 1 0; #3
@@ -48,9 +52,17 @@ adj =[ 0 1 0 0 0 0; #1
        0 0 1 1 0 1;
        0 0 0 0 1 0]
 
-
 con = Connections(adj,no1,no2,no3,no4,no5,no6)
+con.Nodes[1]
+
 str = Structure(con,beam1,beam2,beam3,beam4,beam5,beam6)
+
+
+str.AdjMat.Nodes[1].x
+@time str = change_node(str,2;x=1,y = 2,ϕ = 3)
+str.AdjMat.Nodes[1].ϕ
+op = :x
+str2 = @set str.AdjMat.Nodes[3].$op = 1.1
 
 r = rand(Float64,36)
 s = zeros(Float64,36)
@@ -77,9 +89,6 @@ plot!(aspect_ratio = :equal, lims =:auto)
 x = zeros(Float64,30)
 r = similar(x)
 loss!(r,str,x,collect(nodefeatures[:,1:6]'),collect(beamfeatures'))
-
-r
-
 #open chain
 adj =[ 0 1 0 0 ; #1
        1 0 1 1 ; #2
@@ -118,4 +127,6 @@ rad2deg(odesol[2](1)[2])
 odesol[5](1)[[3,4]] 
 x1,y1 = odesol[4](0)[[3,4]] .*100
 x2,y2 = odesol[5](0)[[3,4]] .*80 
+
+
 

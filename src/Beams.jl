@@ -9,6 +9,17 @@ function ode!(dT,T,p,s)
     dT[7] = 0.
 end 
 
-func = ODEFunction(ode!)
+function jac!(dT,T,p,s)
+    m,θ,x,y,fx,fy,κ = T
+    dT[1,2] = fx*cos(θ) + fy*sin(θ)
+    dT[1,5] = sin(θ)
+    dT[1,6] = -cos(θ)
+    dT[2,1] = 1 
+    dT[2,7] = 1
+    dT[3,2] = -sin(θ)
+    dT[4,2] = cos(θ)
+end 
+
+func = ODEFunction(ode!, jac = jac!)
 
 prob = ODEProblem(func,zeros(Float64,7),(0.,1.))

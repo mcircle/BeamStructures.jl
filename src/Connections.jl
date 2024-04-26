@@ -1,12 +1,15 @@
 const startof = 1
 const endof  = 2
 
-struct Connections{OT,A<:Dict{Int,Vector},N<:Dict{Int,Vector{Pair}},B<:Dict{Int,Pair},T<:Dict{Int,Boundary}} <: AbstractMatrix{OT}
+struct Connections{A<:Dict{Int,Vector},N<:Dict{Int,Vector{Pair}},B<:Dict{Int,Pair},T<:Tuple{Vararg{Boundary}}} <: AbstractMatrix{Int}
     #"Adjacencematrix"
     AdjMat::A
     Nodes2Beams::N # stores Nodes connected to Beam and at which end
     Beams2Nodes::B # stores Beams connected to Nodes at start/end
     Nodes::T
+    function Connections(a::A,n::N,b::B,t::T) where{A<:Dict{Int,Vector},N<:Dict{Int,Vector{Pair}},B<:Dict{Int,Pair},T<:Tuple{Vararg{Boundary}}}
+        new{A,N,B,T}(a,n,b,t)
+    end
 end 
 
 function get_branches(con::Connections)
@@ -35,11 +38,11 @@ function Connections(adj::AbstractMatrix{T},tps) where{T}
             b +=1
         end 
     end 
-    Connections{T,typeof(adjmat),typeof(nodes),typeof(Beams),typeof(tps)}(adjmat,nodes,Beams,tps)
+    Connections(adjmat,nodes,Beams,tps)
 end 
 
 function Connections(adj::AbstractMatrix,tps...)
-    Connections(adj,Dict(x=>y for (x,y) in enumerate(tps)))
+    Connections(adj,tps)
 end 
 
 function incidence(con::Connections)
@@ -54,17 +57,16 @@ end
 #erhalte Adjacencematrix von Kantengraph
 edge_adjacence(ct) = incidence(ct)' * incidence(ct) .- Matrix(2*I,length(ct.Beams),length(ct.Beams))
 Base.size(A::Connections) = Tuple(length(A.AdjMat) .* ones(Int,2))
-Base.getindex(A::Connections{OT,N,B,T},i,j) where{OT,N,B,T} = j ∈ A.AdjMat[i] || i ∈ A.AdjMat[j] ? one(OT) : zero(OT)
+Base.getindex(A::Connections{OT,N,B,T},i,j) where{OT,N,B,T} = j ∈ A.AdjMat[i] || i ∈ A.AdjMat[j] ? 1 : 0
 
 function get_neighbors(c::Connections,node)
     findall(x->x == 1,c[:,node])
 end 
 
-function Adj_norm(adj,selfatt = true)
-    dia = selfatt ? Matrix{eltype(adj)}(I,size(adj)) : zero(eltype(adj)) #adding selfattation
-    ai = adj + dia
-    D = sum(ai,dims = 1) .* Matrix{Float32}(I,size(ai))
-    Dinv = sqrt(inv(D))
-    Dinv * ai * Dinv
+function Adj_norm(adj::Matrix{T},selfatt = true) where {T}
+    ai = adj .+ (selfatt ? Matrix{T}(I,size(adj)...) : zero(T)) #adding selfattation
+    D = sum(ai,dims = 1) .* I(size(ai,1))
+    Dinv = sqrt(inv(D)) 
+    Dinv * ai * Dinv 
 end 
 

@@ -83,8 +83,8 @@ struct CompliantClamp{T} <:Boundary
     c::T
 end
 
-function CompliantClamp(x::X,y::Y,ϕ::P,fx::FX,fy::FY,c::C) where {X,Y,P,FX,FY,MZ,C}
-    p = promote(x,y,ϕ,fx,fy,mz,c)
+function CompliantClamp(x::X,y::Y,ϕ::P,fx::FX,fy::FY,c::C) where {X,Y,P,FX,FY,C}
+    p = promote(x,y,ϕ,fx,fy,c)
     CompliantClamp(p...)
 end  
 
@@ -110,4 +110,3 @@ end
 Base.length(b::Beam) = 7
 Base.getindex(b::Beam,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Beam)[idx])
 Base.getindex(b::Beam,idx::Int) = getfield(b,fieldnames(Beam)[idx])
-
