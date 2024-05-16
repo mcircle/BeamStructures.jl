@@ -1,4 +1,5 @@
 #New_Str1
+
 using Plots
 plotlyjs(size = (800,600))
 #parameters

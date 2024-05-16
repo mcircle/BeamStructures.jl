@@ -1,5 +1,5 @@
 
-struct Structure{A<:Connections,BE<:Tuple{<:Beam},So,Se,KW} 
+struct Structure{A<:Connections,BE,So,Se,KW} 
     AdjMat::A
     Beams::BE
     Solver::So
@@ -33,7 +33,7 @@ end
 
 normfactor_m(b::Beam) = 12* b.l/(b.E*b.w*b.h^3) 
 normfactor_f(b::Beam) = b.l * normfactor_m(b) 
-normvector(b::Beam) = [normfactor_m(beams[beam]),normfactor_f(beams[beam]),normfactor_f(beams[beam])]
+normvector(b::Beam) = [normfactor_m(b),normfactor_f(b),normfactor_f(b)]
 
 function initialize_boundary(node::Boundary,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0, = node.x,node.y,node.ϕ
@@ -51,7 +51,7 @@ function initialize_boundary(node::CompliantClamp,beam::Beam,parameters::Abstrac
     m = node.c * (beam.θs .- parameters[1]) .* normfactor_m(beam)
     fx = parameters[2] * normfactor_f(beam) #am Balkenelement
     fy = parameters[2] * normfactor_f(beam) #am Balkenelement
-    return [m,θ0 + θs + parameters[1],x./l,y./l,fx,fy,κ*l]
+    return [m,θ0 + beam.θs + parameters[1],x./l,y./l,fx,fy,κ*l]
 end
 
 function initialize_boundary(node::Clamp,beam::Beam,parameters::AbstractVector{T}) where {T}
@@ -103,12 +103,12 @@ function residuals!(res::AbstractVector{T},node::Branch,beams,beams_end,y,ind) w
     ŷp[1] -= θ # v+ θn 
     ind += 3
     for (beam,point) in beams_end[2:end]
-        l = beams[beam].l
-        θ = beams[beam][5+point]
+        @inbounds l =  beams[beam].l
+        @inbounds θ =  beams[beam][5+point]
         res_pos = @view res[ind:ind+2]
-        res_pos .= ŷp .- y[point][2:4,beam].*[1,l,l]
-        res_pos[1] += θ #+ θn
-        res_force .+= getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
+        @inbounds res_pos .= ŷp .-  y[point][2:4,beam].*[1,l,l]
+        @inbounds res_pos[1] += θ #+ θn
+        @inbounds res_force .+= getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
         ind += 3 
     end
     ind
@@ -117,8 +117,8 @@ end
 function residuals!(res::AbstractVector{T},node::ExtForces,beams,beams_end,y,ind) where{T}
     #Forces are  important
     for (beam,point) in beams_end
-        res = @view res[ind:ind+2]
-        res .= node[[6,4,5]]  .+ getsign(point).* y[point][[1,5,6],beam] ./ normvector(beams[beam])
+        @inbounds res = @view res[ind:ind+2]
+        @inbounds res .= node[[6,4,5]]  .+ getsign(point).* y[point][[1,5,6],beam] ./ normvector(beams[beam])
         ind += 3
     end 
     ind
@@ -128,9 +128,9 @@ function residuals!(res::AbstractVector{T},node::CompliantClamp,beams,beams_end,
     #Forces are  important
     for (beam,point) in beams_end
         res = @view res[ind:ind+2] 
-        res[1] = node.c * (beam[4 .+ point] .- y[point][2,beam]) .- getsign(point).* y[point][1,beam] ./ normfactor_m(beams[beam])
-        res[2] = node.x .- y[point][3,beam] .* beams[beam].l
-        res[3] = node.y .- y[point][4,beam] .* beams[beam].l
+        @inbounds res[1] = node.c * (beam[4 .+ point] .- y[point][2,beam]) .- getsign(point).* y[point][1,beam] ./ normfactor_m(beams[beam])
+        @inbounds res[2] = node.x .- y[point][3,beam] .* beams[beam].l
+        @inbounds res[3] = node.y .- y[point][4,beam] .* beams[beam].l
         ind += 3
     end 
     ind
@@ -138,8 +138,8 @@ end
 
 function residuals!(res::AbstractVector{T},node::Free,beams,beams_end,y,ind) where{T}
     for (beam,point) in beams_end
-        res_ = @view res[ind:ind+2]
-        res_ .= y[point][[1,5,6],beam] ./ normvector(beams[beam])
+        @inbounds res_ = @view res[ind:ind+2]
+        @inbounds res_ .= y[point][[1,5,6],beam] ./ normvector(beams[beam])
         ind += 3
     end 
     ind
@@ -148,8 +148,8 @@ end
 function residuals!(res::AbstractVector{T},node::Boundary,beams,beams_end,y,ind) where{T}
     #Forces and positions are important
     for (beam,point) in beams_end
-        res_ = @view res[ind:ind+2]
-        res_ .= node[[6,4,5]] .+ getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
+        @inbounds res_ = @view res[ind:ind+2]
+        @inbounds res_ .= node[[6,4,5]] .+ getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
 
         ind += 3
     end 
@@ -159,9 +159,9 @@ end
 function residuals!(res::AbstractVector{T},node::Clamp,beams,beams_end,y,ind) where{T}
     #Positions are important
     for (beam,point) in beams_end
-            res_ = @view res[ind:ind+2]
-            res_ .= node[[3,1,2]] .- y[point][2:4,beam] .* [1,beams[beam].l,beams[beam].l]
-            res_[1] += beams[beam].θe            
+            @inbounds res_ = @view res[ind:ind+2]
+            @inbounds  res_ .= node[[3,1,2]] .- y[point][2:4,beam] .* [1,beams[beam].l,beams[beam].l]
+            @inbounds res_[1] += beams[beam].θe            
             ind += 3
     end 
     ind
@@ -169,10 +169,10 @@ end
 
 function residuals!(res::AbstractVector{T},node::CompliantClamp,beams,beams_end,y,ind) where{T}
     for (beam,point) in beams_end
-        res_ = @view res[ind:ind+2]
-        m = node.c * (y[point] - node.ϕ)
-        res_[1] .= m .- y[point][1,beam] * normfactor_m(beams[beam])
-        res_[2:3] .= node[2:3] .- y[point][3:4,beam] .* [beams[beam].l,beams[beam].l]
+        @inbounds res_ = @view res[ind:ind+2]
+        @inbounds m = node.c *  (y[point][2,beam] - node.ϕ)
+        @inbounds res_[1] .= m .- y[point][1,beam] * normfactor_m(beams[beam])
+        @inbounds res_[2:3] .= node[2:3] .-  y[point][3:4,beam] .*  [beams[beam].l,beams[beam].l]
        
         ind += 3
     end 
@@ -215,6 +215,7 @@ function (str::Structure)(residuals::T,values::T) where{T} #new loss
     sols = str(inits)
     residuals!(residuals,str,sols)
 end 
+
 function (str::Structure)(values::AbstractVector,forplt::Bool = false)
     inits = initialize(str,values)
     str(inits,forplt)
@@ -222,14 +223,14 @@ end
 
 function change_node(str::Structure,node::Int;kwargs...)
     for (field,value) in kwargs
-        str = @set str.AdjMat.Nodes[node].$field = value 
+        str = Setfield.@set str.AdjMat.Nodes[node].$field = value 
     end 
     str 
 end  
 
 function change_beam(str::Structure,beam::Int;kwargs...)
     for (field,value) in kwargs
-        str = @set str.Beams[node].$field = value 
+        str = Setfield.@set str.Beams[node].$field = value 
     end 
     str 
 end  

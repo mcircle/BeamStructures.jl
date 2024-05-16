@@ -9,7 +9,7 @@ function ode!(dT,T,p,s)
     dT[7] = 0.
 end 
 
-function jac!(dT,T,p,s)
+function jac!(dT,T,p,s) #jacobi 
     m,θ,x,y,fx,fy,κ = T
     dT[1,2] = fx*cos(θ) + fy*sin(θ)
     dT[1,5] = sin(θ)

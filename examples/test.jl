@@ -4,10 +4,9 @@ node2 = Free(0.,0.,0.,0.,75.,2.)
 node2[[1,4,5]]
 
 adj = [0 1 0; 
-1 0 1;
-0 1 0]
-adj = [0 1; 
-       1 0]
+       1 0 1;
+       0 1 0]
+
 
 
 con = Connections(adj,node1,node2,node1,node2,node2)
@@ -29,7 +28,7 @@ plot(sol,idxs = (3,4))
 res = rand(Float64,3)
 inp = rand(Float64,3)
 
-@run residuals!(res,str,sol)
+residuals!(res,str,sol)
 residuals!(res,str,sol)
 res
 
