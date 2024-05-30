@@ -127,7 +127,7 @@ end
 function residuals!(res::AbstractVector{T},node::CompliantClamp,beams,beams_end,y,ind) where{T}
     #Forces are  important
     for (beam,point) in beams_end
-        res = @view res[ind:ind+2] 
+        @inbounds res = @view res[ind:ind+2] 
         @inbounds res[1] = node.c * (beam[4 .+ point] .- y[point][2,beam]) .- getsign(point).* y[point][1,beam] ./ normfactor_m(beams[beam])
         @inbounds res[2] = node.x .- y[point][3,beam] .* beams[beam].l
         @inbounds res[3] = node.y .- y[point][4,beam] .* beams[beam].l
@@ -150,7 +150,6 @@ function residuals!(res::AbstractVector{T},node::Boundary,beams,beams_end,y,ind)
     for (beam,point) in beams_end
         @inbounds res_ = @view res[ind:ind+2]
         @inbounds res_ .= node[[6,4,5]] .+ getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
-
         ind += 3
     end 
     ind
@@ -158,23 +157,16 @@ end
 
 function residuals!(res::AbstractVector{T},node::Clamp,beams,beams_end,y,ind) where{T}
     #Positions are important
-    for (beam,point) in beams_end
-            @inbounds res_ = @view res[ind:ind+2]
-            @inbounds  res_ .= node[[3,1,2]] .- y[point][2:4,beam] .* [1,beams[beam].l,beams[beam].l]
-            @inbounds res_[1] += beams[beam].θe            
-            ind += 3
-    end 
-    ind
-end 
-
-function residuals!(res::AbstractVector{T},node::CompliantClamp,beams,beams_end,y,ind) where{T}
-    for (beam,point) in beams_end
+    beamsiter = filter(x->last(x) .== 2,beams_end)
+    isempty(beamsiter) && return ind
+    beamnodesiter = iterate(beamsiter,1) 
+    while ~isnothing(beamnodesiter)
+        ((beam,point),iter) = beamnodesiter
         @inbounds res_ = @view res[ind:ind+2]
-        @inbounds m = node.c *  (y[point][2,beam] - node.ϕ)
-        @inbounds res_[1] .= m .- y[point][1,beam] * normfactor_m(beams[beam])
-        @inbounds res_[2:3] .= node[2:3] .-  y[point][3:4,beam] .*  [beams[beam].l,beams[beam].l]
-       
+        @inbounds  res_ .= node[[3,1,2]] .- y[point][2:4,beam] .* [1,beams[beam].l,beams[beam].l]
+        @inbounds res_[1] += beams[beam].θe            
         ind += 3
+        beamnodesiter = iterate(beamsiter,iter)
     end 
     ind
 end 
@@ -220,6 +212,10 @@ function (str::Structure)(values::AbstractVector,forplt::Bool = false)
     inits = initialize(str,values)
     str(inits,forplt)
 end 
+function (str::Structure)(f::Union{typeof(zeros),typeof(rand)},forplt::Bool = false)
+    inits = initialize(str,f(Float64,str))
+    str(inits,forplt)
+end 
 
 function change_node(str::Structure,node::Int;kwargs...)
     for (field,value) in kwargs
@@ -230,7 +226,41 @@ end
 
 function change_beam(str::Structure,beam::Int;kwargs...)
     for (field,value) in kwargs
-        str = Setfield.@set str.Beams[node].$field = value 
+        str = Setfield.@set str.Beams[beam].$field = value 
     end 
     str 
 end  
+
+function getinitials(str::Structure)
+    nodes = str.AdjMat.Nodes
+    nodes2beams = str.AdjMat.Nodes2Beams
+    beams = str.AdjMat.Beams2Nodes
+    # branches = findall(x->isa(x,Branch),nodes)
+    initsize = 0
+    for (beam,(atstart,atend)) in beams
+        initsize += isa(nodes[atstart],Branch) ? 6 : 3
+    end 
+    return initsize
+end 
+
+function Base.zeros(::Type{T},str::Structure) where{T}
+    zeros(T,getinitials(str))
+end 
+
+function Base.zeros(::Type{T},strs::Vector{Structure}) where{T}
+    inits = Vector{Vector{T}}(undef,length(strs))
+    for ind in eachindex(inits)
+        inits[ind] = zeros(T,getinitials(strs[ind]))
+    end 
+    return inits
+end 
+function Random.rand(::Type{T},str::Structure) where{T}
+    rand(T,getinitials(str))
+end 
+function Random.rand(::Type{T},strs::Vector{Structure}) where{T}
+    inits = Vector{Vector{T}}(undef,length(strs))
+    for ind in eachindex(inits)
+        inits[ind] = rand(T,getinitials(strs[ind]))
+    end 
+    return inits
+end 

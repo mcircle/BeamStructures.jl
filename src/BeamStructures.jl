@@ -23,6 +23,6 @@ module BeamStructures
 
     export Connections, edge_adjacence,incidence,Adj_norm, initialize, Beam
 
-    export Boundary,ExtForces, Clamp, Branch, Free, Structure,loss!
+    export Boundary,ExtForces, Clamp, Branch, Free, Structure,residuals!
 
 end
