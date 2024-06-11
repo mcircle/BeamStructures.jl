@@ -98,7 +98,7 @@ struct Beam{T}
     θe::T
 end 
 
-function Beam(l,h,w,κ0;E = 2e11,θs = 0.,θe = θs + l*κ0)
+function Beam(l,h,w,κ0;E = 2.1e5,θs = 0.,θe = θs + l*κ0)
     p = promote(l,h,w,κ0,E,θs,θe)
     Beam(p...)
 end 

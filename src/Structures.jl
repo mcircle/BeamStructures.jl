@@ -24,6 +24,7 @@ out4plt(sol, i) = (sol, false)
 out4loss(sol,i) = ((sol[1],sol[end]),false)
 reduction4plt(u,data,I) = (append!(u, data), false)
 function reduction4loss(u,data,batch) 
+    
     for b in batch
         view(u[1],:,b) .=  data[b][1]
         view(u[2],:,b) .=  data[b][2]
@@ -107,7 +108,7 @@ function residuals!(res::AbstractVector{T},node::Branch,beams,beams_end,y,ind) w
         @inbounds θ =  beams[beam][5+point]
         res_pos = @view res[ind:ind+2]
         @inbounds res_pos .= ŷp .-  y[point][2:4,beam].*[1,l,l]
-        @inbounds res_pos[1] += θ #+ θn
+        @inbounds res_pos[1] += θ
         @inbounds res_force .+= getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
         ind += 3 
     end
