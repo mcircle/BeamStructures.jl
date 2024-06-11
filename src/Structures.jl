@@ -1,22 +1,31 @@
 
-struct Structure{A<:Connections,BE,So,Se,KW} 
+struct Structure{A<:Dict{CartesianIndices,Int},So,Se,KW} 
     AdjMat::A
-    Beams::BE
     Solver::So
     SensAlg::Se
     kwargs::KW
-    function Structure(adj::A,beams::BE,solver::So,sensalg::Se,kwargs::KW) where{A,BE,So,Se,KW}
-        new{A,BE,So,Se,KW}(adj,beams,solver,sensalg,kwargs)
+    function Structure(adj::A,solver::So,sensalg::Se,kwargs::KW) where{A,So,Se,KW}
+        new{A,So,Se,KW}(adj,solver,sensalg,kwargs)
     end 
 end
 
-function Structure(adj::Connections,beams::Vararg{Beam} ;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kwargs...) 
-    # beams_ = Dict(x=>y for (x,y) in enumerate(beams))
-    Structure(adj,beams,solver,sensalg,kwargs)
+function Structure(adj::AbstractMatrix{T}, ;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kwargs...) where{T}
+    d = Dict{CartesianIndices,Int}()
+    ci = findall(==(one(T),LowerTriangular(adj)))
+    for (ind,c) in enumerate(ci)
+        d[c] = ind
+    end 
+    Structure(d,solver,sensalg,kwargs)
 end 
 
 function Base.show(io::IO,str::Structure)
-    return println(io, "Structure with $(length(str.AdjMat.Nodes2Beams)) Nodes and $(length(str.AdjMat.Beams2Nodes)) Beam(s).")
+    return println(io, "Structure with $(str.nodes) Nodes and $(length(str.AdjMat)) Beam(s).")
+end 
+
+function setup(rng::Random.AbstractRNG,str::Structure)
+    nodefeatures = rand(rng,Float32,2,str.nodes) 
+    beamfeatures = rand(rng,Float32,1:length(str.AdjMat))
+    return nodefeatures,beamfeatures
 end 
 
 #ODE outcome

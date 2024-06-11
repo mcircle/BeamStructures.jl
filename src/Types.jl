@@ -9,6 +9,8 @@ struct Clamp{T} <:Boundary
     fy::T
     mz::T
 end 
+
+
 function Clamp(x::X,y::Y,ϕ::P,fx::FX,fy::FY,mz::MZ) where {X,Y,P,FX,FY,MZ}
     p = promote(x,y,ϕ,fx,fy,mz)
     Clamp(p...)
