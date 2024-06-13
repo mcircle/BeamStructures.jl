@@ -13,11 +13,12 @@ module BeamStructures
 
     
     include("Beams.jl")
-    include("Types.jl")
+    include("Boundaries.jl")
     include("Connections.jl")
     include("Structures.jl")
     include("Bibliography.jl")
-    # include("ChainRulesExt.jl")
+    include("ChainRulesExt.jl")
+    include("utils.jl")
 
     export Connections, edge_adjacence,incidence,Adj_norm, initialize, Beam
 

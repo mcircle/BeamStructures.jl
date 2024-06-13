@@ -1,31 +1,28 @@
 
-struct Structure{A<:Dict{CartesianIndices,Int},So,Se,KW} 
+struct Structure{A<:AbstractMatrix,Nn,So,Se,KW}
     AdjMat::A
+    nodes::Nn
     Solver::So
     SensAlg::Se
     kwargs::KW
-    function Structure(adj::A,solver::So,sensalg::Se,kwargs::KW) where{A,So,Se,KW}
-        new{A,So,Se,KW}(adj,solver,sensalg,kwargs)
+    function Structure(adj::A,nodes::Nn,solver::So,sensalg::Se,kwargs::KW) where{A,Nn,So,Se,KW}
+        nodes_ = gettype.(nodes)
+        new{A,NTuple{length(nodes),Boundary},So,Se,KW}(adj,nodes_,solver,sensalg,kwargs)
     end 
 end
 
-function Structure(adj::AbstractMatrix{T}, ;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kwargs...) where{T}
-    d = Dict{CartesianIndices,Int}()
-    ci = findall(==(one(T),LowerTriangular(adj)))
-    for (ind,c) in enumerate(ci)
-        d[c] = ind
-    end 
-    Structure(d,solver,sensalg,kwargs)
+function Structure(adj::AbstractMatrix{T},nodes::Vararg{Boundary,N};solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kwargs...) where{T,N}
+    pos = vec(any(==(one(T)),adj,dims = 1))
+    @assert sum(pos) == N  "Number of Nodes ($length(nodes)) is does not match the adjency matrix!"
+    Structure(adj,nodes,solver,sensalg,kwargs)
+end 
+
+function Structure(adj::Connections,nodes::Vararg{Boundary,N};solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kwargs...) where{N}
+    Structure(adj,nodes,solver,sensalg,kwargs)
 end 
 
 function Base.show(io::IO,str::Structure)
     return println(io, "Structure with $(str.nodes) Nodes and $(length(str.AdjMat)) Beam(s).")
-end 
-
-function setup(rng::Random.AbstractRNG,str::Structure)
-    nodefeatures = rand(rng,Float32,2,str.nodes) 
-    beamfeatures = rand(rng,Float32,1:length(str.AdjMat))
-    return nodefeatures,beamfeatures
 end 
 
 #ODE outcome
@@ -88,14 +85,15 @@ function initialize_boundary(node::ExtForces,beam::Beam,parameters::AbstractVect
     return [m,θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,fx,fy,κ*l]
 end 
 
-function initialize(str::Structure,parameters::Vector{T}) where {T}
-    con = str.AdjMat
+function initialize(str::Structure,parameters::Vector{T},bn::NamedTuple) where {T}
+    adj = str.AdjMat
     # @assert 3*(length(con.Beams) + length(str.Branches)) == length(parameters)
-    mat = Matrix{T}(undef,7,length(con.Beams2Nodes))
+    mat = Matrix{T}(undef,7,length(bn.Beams))
     ind = 1 
-    for (beam,(st,en)) in con.Beams2Nodes 
-        add = isa(con.Nodes[st],Branch) ? 6 : 3
-        mat[:,beam] .= initialize_boundary(con.Nodes[st],str.Beams[beam],parameters[ind:ind + add - 1])
+    for (beam,ci) in enumerate(findall(==(1),LowerTriangular(adj))) 
+        st = ci[1]
+        add = isa(str.nodes[st],Branch) ? 6 : 3
+        mat[:,beam] .= initialize_boundary(str.nodes[st],bn.Beams[beam],parameters[ind:ind + add - 1])
         ind += add
     end 
     return mat
@@ -212,7 +210,7 @@ function (str::Structure)(x::Matrix, #x[:,i] = u0 = [m_i,θ_i,x_i<- node_i,y_i <
                 )
 end
 
-function (str::Structure)(residuals::T,values::T) where{T} #new loss
+function (str::Structure)(residuals::T,values::T;nodes::NTuple{Nn,Boundary},beams::NTuple{Nb,Beam}) where{T,Nn,Nb} #new loss
     inits = initialize(str,values)
     sols = str(inits)
     residuals!(residuals,str,sols)

@@ -1,3 +1,26 @@
+struct Beam{T} 
+    l::T
+    h::T
+    w::T
+    κ0::T
+    E::T
+    θs::T
+    θe::T
+end 
+
+function Beam(l,h,w,κ0;E = 2.1e5,θs = 0.,θe = θs + l*κ0)
+    p = promote(l,h,w,κ0,E,θs,θe)
+    Beam(p...)
+end 
+
+function Base.show(io::IO,beam::Beam)
+    return println(io, "Beam with Length: $(beam.l),width: $(beam.w), height: $(beam.h), curvature: $(beam.κ0) and E: $(beam.E)")
+end 
+
+Base.length(b::Beam) = 7
+Base.getindex(b::Beam,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Beam)[idx])
+Base.getindex(b::Beam,idx::Int) = getfield(b,fieldnames(Beam)[idx])
+
 function ode!(dT,T,p,s)
     m,θ,x,y,fx,fy,κ = T
     dT[1] = fx*sin(θ)-fy*cos(θ)   #dM
@@ -23,3 +46,4 @@ end
 func = ODEFunction(ode!, jac = jac!)
 
 prob = ODEProblem(func,zeros(Float64,7),(0.,1.))
+
