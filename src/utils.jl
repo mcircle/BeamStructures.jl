@@ -40,13 +40,13 @@ switchCI(a::CartesianIndex{2}) = CartesianIndex((a[2],a[1]))
 @non_differentiable switchCI(a)
 
 findbeamsatnode(::Clamp,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x-> x[1] == node,nodes),Vector{Int}())
-findbeamsatnode(::Branch,node::Int,nodes::AbstractVector{CartesianIndex{2}}) =  (findall(x->x[2] == node,nodes),findall(x-> x[1] == node,nodes))
+findbeamsatnode(::Branch,node::Int,nodes::AbstractVector{CartesianIndex{2}}) =  (findall(x->x[1] == node,nodes),findall(x-> x[2] == node,nodes))
 
 normfactor_m(b::Beam) = 12* b.l/(b.E*b.w*b.h^3) 
 normfactor_f(b::Beam) = b.l * normfactor_m(b) 
 normvector(b::Beam) = [normfactor_m(b),normfactor_f(b),normfactor_f(b)]
 
-getside(x,beams) = ifelse(x ∈ beams[1],1,2)
+getside(x,beams) = ifelse(x ∈ beams[1],2,1)
 
 getnextidxs(::Clamp,beams) = 3 * sum(length.(beams))
 getnextidxs(::Boundary,beams) = 3 * (sum(length.(beams)))
@@ -65,3 +65,18 @@ end
 getpositionindices(beams) = getindices(beams,[2,3,4])
 getforceindices(beams) = getindices(beams,[1,5,6])
 
+@non_differentiable getpositionindices(b)
+@non_differentiable getforceindices(b)
+
+reducevcat(res::AbstractVector{T}) where{T<:AbstractVector{TT}} where{TT} = reduce(vcat,res;init = Vector{TT}())
+
+Base.eltype(::Beam{T}) where{T} = T
+
+function getfieldof(beams,s::Symbol)
+    T = eltype(eltype(beams))
+    vec = Vector{T}(undef,length(beams))
+    for ind in eachindex(vec)
+        vec[ind] = getfield(beams[1],s)
+    end 
+    vec
+end  
