@@ -23,8 +23,8 @@ module BeamStructures
     include("utils.jl")
     include("ChainRulesExt.jl")
 
-    export Connections, edge_adjacence,incidence,Adj_norm, initialize, Beam
+    export Connections, edge_adjacence,incidence,Adj_norm, Beam
 
-    export Boundary,ExtForces, Clamp, Branch, Free, Structure,residuals!,initialize
+    export Boundary,ExtForces, Clamp, Branch, Free, Structure,residuals!
 
 end

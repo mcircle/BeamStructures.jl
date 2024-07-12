@@ -28,6 +28,13 @@ function Base.show(io::IO,beam::Beam)
     return println(io, "Beam with Length: $(beam.l),width: $(beam.w), height: $(beam.h), curvature: $(beam.κ0) and E: $(beam.E)")
 end 
 
+function change_beam(beam::Beam;kwargs...)
+    for (field,value) in kwargs
+        beam = Setfield.@set beam.$field = value 
+    end 
+    beam
+end  
+
 Base.length(b::Beam) = 7
 Base.getindex(b::Beam,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Beam)[idx])
 Base.getindex(b::Beam,idx::Int) = getfield(b,fieldnames(Beam)[idx])

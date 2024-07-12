@@ -174,24 +174,6 @@ function (str::Structure)(residuals::T,values::T,bn::NamedTuple) where{T} #new l
     residuals!(residuals,str,sols,bn)
 end 
 
-function (str::Structure)(values::AbstractVector,forplt::Bool = false)
-    inits = initialize(str,values)
-    str(inits,forplt)
-end 
-function (str::Structure)(f::Union{typeof(zeros),typeof(rand)},forplt::Bool = false)
-    inits = initialize(str,f(Float64,str))
-    str(inits,forplt)
-end 
-
-
-
-function change_beam(str::Structure,beam::Int;kwargs...)
-    for (field,value) in kwargs
-        str = Setfield.@set str.Beams[beam].$field = value 
-    end 
-    str 
-end  
-
 function getinitials(str::Structure)
     nodes = str.AdjMat.Nodes
     nodes2beams = str.AdjMat.Nodes2Beams
