@@ -7,8 +7,6 @@ function getnames(beams::Vararg{Beam,N}) where{N}
     NamedTuple{ntuple(i->Symbol(:Beam_,i),N)}(beams)
 end 
 
-gettype(::T) where{T<:Boundary} = T
-
 function prepare(args::Vararg{Union{Beam,Boundary},N}) where{N}
     beams = filter(x->isa(x,Beam),args)
     bounds = filter(x->isa(x,Boundary),args)
@@ -65,6 +63,16 @@ end
 getpositionindices(beams) = getindices(beams,[2,3,4])
 getforceindices(beams) = getindices(beams,[1,5,6])
 
+function getindices(s::Int)
+    cis = Vector{CartesianIndex{2}}(undef,reduce(+,1:s-1))
+    start = 1
+    for ind in 2:s
+        cis[start:start + s - ind] = collect(CartesianIndices((ind:s,ind-1:ind-1)))
+        start += s - ind + 1
+    end 
+    cis
+end 
+@non_differentiable getindices(s)
 @non_differentiable getpositionindices(b)
 @non_differentiable getforceindices(b)
 

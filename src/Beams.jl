@@ -8,7 +8,7 @@ struct Beam{T<:Real}
     θe::Union{T,Nothing}
 end 
 
-function Beam(l,h,w,κ0;E = 2.1f5,θs = 0f0,θe = θs + l*κ0)
+function Beam(l,h,w,κ0;E = 2.1f5,θs = 0,θe = θs + l*κ0)
     p = promote(l,h,w,κ0,E,θs,θe)
     Beam(p...)
 end 
@@ -52,26 +52,52 @@ Base.:abs2(b::Beam) = b*b
 Base.:/(a::Real,b::Beam) = Beam(a ./ b...)
 Base.:/(b::Beam,a::Real) = Beam(b ./ a...)
 Base.:+(a::Beam,b::Beam) = Beam(a .+ b...)
-Base.:+(a::Beam,b::NamedTuple) = Beam(map(x->isnothing(getfield(b,x)) ? getfield(a,x) : getfield(a,x) + getfield(b,x),keys(b))...)
+# Base.:+(a::Beam,b::NamedTuple) = Beam(map(x->isnothing(getfield(b,x)) ? getfield(a,x) : getfield(a,x) + getfield(b,x),keys(b))...)
+# Base.:+(b::NamedTuple,a::Beam) = a + b
 
 Optimisers.functor(b::Beam{T}) where{T} = (NamedTuple{fieldnames(Beam)}(b[1:7]),Beam{T})
 Optimisers.init(o::Adam, x::Beam{T}) where{T} = (Beam{T}(zeros(T,7)...),Beam{T}(zeros(T,7)...), T.(o.beta))
 Optimisers.init(o::WeightDecay, x::Beam) = nothing
 Optimisers.isnumeric(::Beam) = true
 Optimisers.subtract!(a::Beam{T},b::Beam) where{T} = Beam{T}(a .- Beam{T}(merge(Optimisers.mapvalue(_->zero(T),Optimisers.functor(b)[1]),Optimisers.trainable(b)))...)
-Optimisers.trainable(b::Beam) = (;l = b.l,h = b.h,w = b.w,κ0 = b.κ0,θs = b.θs,θe = b.θe)
+Optimisers.trainable(b::Beam) = (;l = b.l,h = b.h,w = b.w,κ0 = b.κ0,E = b.E,θs = b.θs,θe = b.θe)
 
 Optimisers._trainable(b::Beam{T},fr) where{T} = Beam{T}(merge(Optimisers.mapvalue(_ -> nothing, Optimisers.functor(b)[1]), Optimisers.trainable(b)))
 
+Base.zero(::Beam{T}) where{T} = Beam(zeros(T,7)...)
+
+@generated function combine(β,mt::B,dx) where{B<:Beam}
+    fields = fieldnames(mt)
+    exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
+    return quote
+        $(Expr(:call,B, exprs...))
+    end
+end 
+
+@generated function combineabs2(β,mt::B,dx) where{B<:Beam}
+    fields = fieldnames(mt)
+    exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * abs2(getproperty(dx, $(QuoteNode(f))))) for f in fields]
+    return quote
+        $(Expr(:call,B, exprs...))
+    end
+end 
+
+@generated function combine(η,βt,mt::B,vt::B,ϵ) where{B<:Beam}
+    fields = fieldnames(mt)
+    exprs = [:(getproperty(mt, $(QuoteNode(f))) / (1-βt[1]) / (sqrt(getproperty(vt, $(QuoteNode(f))) / (1 -βt[2]))+ ϵ)* η) for f in fields]
+    return quote
+        $(Expr(:call,B, exprs...))
+    end
+end 
 
 function Optimisers.apply!(o::Adam,state,b::Beam{T},dx) where{T}
     η, β, ϵ = T(o.eta), T.(o.beta), T(o.epsilon)
     mt, vt, βt = state
-    # @show mt vt dx 
-    Optimisers.@.. mt = β[1] * mt + (1 - β[1]) * dx
-    Optimisers.@.. vt = β[2] * vt + (1 - β[2]) * abs2(dx)
-    dx′ = Optimisers.@lazy mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
-    return (Beam{T}(mt...), Beam{T}(vt...), βt .* β), Beam{T}(dx′...)
+    
+    mt = combine(β[1],mt,dx)
+    vt = combineabs2(β[2],vt,dx)
+    dx′ = combine(η,βt,mt,vt,ϵ) #  mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
+    return (mt, vt, βt .* β), dx′
 end 
 
 function Optimisers.apply!(o::WeightDecay, state, x::Beam{T}, dx) where{T}
@@ -86,13 +112,13 @@ Optimisers.init(o::OptimiserChain, x::Beam) = map(opt -> Optimisers.init(opt, x)
 Optimisers.init(o::Optimisers.ClipNorm, x::Beam) = nothing
 
 function Optimisers.apply!(o::Optimisers.ClipNorm, state, x::Beam{T}, dx) where T
-  nrm = norm(dx[[1,2,3,4,6,7]], o.p)
+  nrm = norm(dx, o.p)
   if o.throw && !isfinite(nrm)
     throw(DomainError("gradient has $(o.p)-norm $nrm, for array $(summary(x))"))
   end
   λ = T(min(o.omega / nrm, 1))
 #   @show Beam{T}(dx * λ...)
-  return state, Beam{T}(dx * λ...)
+  return state, λ * Beam{T}(dx) 
 end
 
 function ode!(dT,t::AbstractVector{T},p,s) where{T}
