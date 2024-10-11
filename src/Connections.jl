@@ -21,15 +21,17 @@ end
 types: Dict of Int => Symbol to describe the type of Node: clamp,joint,branch,slider
 """
 function Connections(adj::AbstractMatrix{T},tps) where{T}
-    @assert length(tps) == size(adj,2)
+    # @assert length(tps) == size(adj,2)
+    nds = vec(any(==(1),adj,dims = 1))
     adjmat = Dict{Int,Vector}()
-    nodes = Dict{Int,Vector{Pair}}([i => [] for i in 1:size(adj,2)])
+    nodes = Dict{Int,Vector{Pair}}([i => [] for i in 1:sum(nds)])
     Beams = Dict{Int,Pair}()
     b = 1 
-    for (n,col) in enumerate(eachcol(adj))
+    adj_ = LowerTriangular(adj)
+    for (n,col) in enumerate(eachcol(adj_[nds,nds]))
         #n = startnode 
         #findall attached nodes 
-        adjmat[n] = findall(x->x > 0,col[n:end]) .+n .-1
+        adjmat[n] = findall(x->x > 0,col)
         #node = node at end of beam
         for node in adjmat[n]
             Beams[b] = n => node

@@ -1,51 +1,38 @@
 
-struct Structure{A<:Connections,BE,So,Se,KW} 
+struct Structure{A<:AbstractMatrix,So,Se,KW}
     AdjMat::A
-    Beams::BE
     Solver::So
     SensAlg::Se
     kwargs::KW
-    function Structure(adj::A,beams::BE,solver::So,sensalg::Se,kwargs::KW) where{A,BE,So,Se,KW}
-        new{A,BE,So,Se,KW}(adj,beams,solver,sensalg,kwargs)
+    function Structure(adj::A,solver::So,sensealg::Se,kwargs::KW) where{A,So,Se,KW}
+        new{A,So,Se,KW}(adj,solver,sensealg,kwargs)
     end 
 end
 
-function Structure(adj::Connections,beams::Vararg{Beam} ;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kwargs...) 
-    # beams_ = Dict(x=>y for (x,y) in enumerate(beams))
-    Structure(adj,beams,solver,sensalg,kwargs)
+function Structure(adj::AbstractMatrix{T};solver = Tsit5(),sensealg = ForwardDiffSensitivity(),kwargs...) where{T}
+    pos = vec(any(x->!isapprox(x,zero(T)),adj,dims = 1))
+    Structure(adj[pos,pos],solver,sensealg,kwargs)
+end 
+
+function Structure(adj::Connections;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kwargs...) 
+    Structure(adj,solver,sensalg,kwargs)
 end 
 
 function Base.show(io::IO,str::Structure)
-    return println(io, "Structure with $(length(str.AdjMat.Nodes2Beams)) Nodes and $(length(str.AdjMat.Beams2Nodes)) Beam(s).")
+    return println(io, "Structure with $(size(str.AdjMat,1)) Nodes and $(Int(sum(str.AdjMat)/2)) Beam(s).")
 end 
 
-#ODE outcome
-out4plt(sol, i) = (sol, false)
-out4loss(sol,i) = ((sol[1],sol[end]),false)
-reduction4plt(u,data,I) = (append!(u, data), false)
-function reduction4loss(u,data,batch) 
-    for b in batch
-        view(u[1],:,b) .=  data[b][1]
-        view(u[2],:,b) .=  data[b][2]
-    end 
-    (u, false)
-end
-
-normfactor_m(b::Beam) = 12* b.l/(b.E*b.w*b.h^3) 
-normfactor_f(b::Beam) = b.l * normfactor_m(b) 
-normvector(b::Beam) = [normfactor_m(b),normfactor_f(b),normfactor_f(b)]
-
-function initialize_boundary(node::Boundary,beam::Beam,parameters::AbstractVector{T}) where {T}
+function initialize_beam(node::Boundary,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0, = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0
-    m,fx,fy,Δθ,Δx,Δy = parameters
+    m,fx,fy = parameters
     m *= normfactor_m(beam) #am Balkenelement
     fx *= normfactor_f(beam) #am Balkenelement
     fy *= normfactor_f(beam) #am Balkenelement
-    return [m,θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,fx,fy,κ*l]
+    return [m,θ0 + θs,x./l,y./l,fx,fy,κ*l]
 end 
 
-function initialize_boundary(node::CompliantClamp,beam::Beam,parameters::AbstractVector{T}) where {T}
+function initialize_beam(node::CompliantClamp,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0, = node.x,node.y,node.ϕ
     l,κ = beam.l,beam.κ0
     m = node.c * (beam.θs .- parameters[1]) .* normfactor_m(beam)
@@ -54,21 +41,21 @@ function initialize_boundary(node::CompliantClamp,beam::Beam,parameters::Abstrac
     return [m,θ0 + beam.θs + parameters[1],x./l,y./l,fx,fy,κ*l]
 end
 
-function initialize_boundary(node::Clamp,beam::Beam,parameters::AbstractVector{T}) where {T}
+function initialize_beam(node::Clamp,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0 = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0     
     m,fx,fy = parameters .* [normfactor_m(beam),normfactor_f(beam),normfactor_f(beam)] #am Balkenelement
     return [m,θ0 + θs,x/l,y/l,fx,fy,κ*l]
 end 
 
-function initialize_boundary(node::Free,beam::Beam,parameters::AbstractVector{T}) where {T}
+function initialize_beam(node::Free,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0 = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0     
     Δθ,Δx,Δy = parameters  #am Balkenelement
     return [zero(T),θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,zero(T),zero(T),κ*l]
 end 
 
-function initialize_boundary(node::ExtForces,beam::Beam,parameters::AbstractVector{T}) where {T}
+function initialize_beam(node::ExtForces,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0 = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0
     Δθ,Δx,Δy = parameters
@@ -78,159 +65,152 @@ function initialize_boundary(node::ExtForces,beam::Beam,parameters::AbstractVect
     return [m,θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,fx,fy,κ*l]
 end 
 
-function initialize(str::Structure,parameters::Vector{T}) where {T}
-    con = str.AdjMat
-    # @assert 3*(length(con.Beams) + length(str.Branches)) == length(parameters)
-    mat = Matrix{T}(undef,7,length(con.Beams2Nodes))
-    ind = 1 
-    for (beam,(st,en)) in con.Beams2Nodes 
-        add = isa(con.Nodes[st],Branch) ? 6 : 3
-        mat[:,beam] .= initialize_boundary(con.Nodes[st],str.Beams[beam],parameters[ind:ind + add - 1])
-        ind += add
-    end 
-    return mat
+function initialize_beam(beams::NamedTuple,nodes::NamedTuple,x,nodepos,i::Int)
+    initialize_beam(nodes[nodepos[i]],beams[i],x[:,i])
+end 
+
+scalepos(beam::Beam,y::AbstractArray,::Val{2})  = [y[1] - beam.θe,y[2].*beam.l,y[3].*beam.l]
+scalepos(beam::Beam,y::AbstractArray,::Val{1})  = [y[1] - beam.θs,y[2].*beam.l,y[3].*beam.l]
+
+function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},beamnbrs) where{T}
+    res = map(x-> [node.ϕ,node.x,node.y] .- scalepos(beams[x],y[2:4,2,x],Val(2)),beamnbrs[1])
+    reduce(hcat,res)
 end
 
-getsign(x) = ifelse(x == 1, -1, 1)
+scaleforce(beam,y) =  y ./normvector(beam)
 
-function residuals!(res::AbstractVector{T},node::Branch,beams,beams_end,y,ind) where{T}
-    beam,point = beams_end[1]
-    l = beams[beam].l
-    θ = beams[beam][5+point]
-    res_force = @view res[ind:ind+2]
-    res_force .=  getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam]).- node[[6,4,5]] #   
-    ŷp = y[point][2:4,beam].*[1,l,l]
-    ŷp[1] -= θ # v+ θn 
-    ind += 3
-    for (beam,point) in beams_end[2:end]
-        @inbounds l =  beams[beam].l
-        @inbounds θ =  beams[beam][5+point]
-        res_pos = @view res[ind:ind+2]
-        @inbounds res_pos .= ŷp .-  y[point][2:4,beam].*[1,l,l]
-        @inbounds res_pos[1] += θ #+ θn
-        @inbounds res_force .+= getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
-        ind += 3 
+function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T}
+    solp = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = zeros(T,3))
+    solm = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = zeros(T,3)) 
+    return solp .- solm .+ node[[6,4,5]]
+end 
+
+reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where {T} = Vector{T}()
+
+function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
+    idcs = LinearIndices(CartesianIndices((1:3,1:fld(length(residuals),3))))
+    adj = str.AdjMat
+    nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
+    start = 1
+    for n in unique(first.(Tuple.(nodes)))
+        node = bn.Nodes[n]
+        beams = findbeamsatnode(node,n,nodes)
+        res = reduceforceat(node,bn.Beams,y,beams)
+        if !isempty(res)
+            residuals[idcs[:,start]] .= res
+            start += 1
+        end 
+        res = reduceposat(node,bn.Beams,y,beams)
+        if !isempty(res)
+            idxs = start:start + size(res,2) - 1
+            residuals[idcs[:,idxs]] .= res
+            start = idxs[end] + 1
+        end  
     end
-    ind
+    residuals 
 end 
 
-function residuals!(res::AbstractVector{T},node::ExtForces,beams,beams_end,y,ind) where{T}
-    #Forces are  important
-    for (beam,point) in beams_end
-        @inbounds res = @view res[ind:ind+2]
-        @inbounds res .= node[[6,4,5]]  .+ getsign(point).* y[point][[1,5,6],beam] ./ normvector(beams[beam])
-        ind += 3
+addposition(node::BT,pos::AbstractVector{T}) where{T,BT<:Boundary{T}} =node + BT(pos...,zeros(T,3)...)
+addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb}} =gettype(node)(T.(node[1:6])...)+ gettype(node)(pos...,zeros(T,3)...)
+
+addposition(node::Boundary,pos::Nothing)  = node
+
+function addpositions(nodes::NamedTuple,x::AbstractMatrix)
+    branches = 1:length(nodes) |> filter((x)->!isa(values(nodes[x]),Clamp))
+    newnodes = map((node,pos)->keys(nodes)[node] => addposition(nodes[node],pos),branches,eachcol(x[:,1:length(branches)]))
+    merge(nodes,newnodes)
+end 
+
+function changestartnodes(nodes,x)
+    anz = length(nodes) - count(x->isa(x,Clamp),values(nodes))
+    nodes_ = addpositions(nodes,x)
+    return anz, nodes_
+end 
+function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{false}) where{T}
+    nodepos = getstartnodes(str.AdjMat)
+
+    anz,nodes_ = changestartnodes(bn.Nodes,x)
+    function prob_func(prob,i,repeat) 
+        u0 = initialize_beam(bn.Beams,nodes_,x[:,anz+1:end],nodepos,i)
+        remake(prob;u0 = u0)
     end 
-    ind
-end 
 
-function residuals!(res::AbstractVector{T},node::CompliantClamp,beams,beams_end,y,ind) where{T}
-    #Forces are  important
-    for (beam,point) in beams_end
-        res = @view res[ind:ind+2] 
-        @inbounds res[1] = node.c * (beam[4 .+ point] .- y[point][2,beam]) .- getsign(point).* y[point][1,beam] ./ normfactor_m(beams[beam])
-        @inbounds res[2] = node.x .- y[point][3,beam] .* beams[beam].l
-        @inbounds res[3] = node.y .- y[point][4,beam] .* beams[beam].l
-        ind += 3
-    end 
-    ind
-end 
-
-function residuals!(res::AbstractVector{T},node::Free,beams,beams_end,y,ind) where{T}
-    for (beam,point) in beams_end
-        @inbounds res_ = @view res[ind:ind+2]
-        @inbounds res_ .= y[point][[1,5,6],beam] ./ normvector(beams[beam])
-        ind += 3
-    end 
-    ind
-end 
-
-function residuals!(res::AbstractVector{T},node::Boundary,beams,beams_end,y,ind) where{T}
-    #Forces and positions are important
-    for (beam,point) in beams_end
-        @inbounds res_ = @view res[ind:ind+2]
-        @inbounds res_ .= node[[6,4,5]] .+ getsign(point) .* y[point][[1,5,6],beam] ./ normvector(beams[beam])
-
-        ind += 3
-    end 
-    ind
-end 
-
-function residuals!(res::AbstractVector{T},node::Clamp,beams,beams_end,y,ind) where{T}
-    #Positions are important
-    for (beam,point) in beams_end
-            @inbounds res_ = @view res[ind:ind+2]
-            @inbounds  res_ .= node[[3,1,2]] .- y[point][2:4,beam] .* [1,beams[beam].l,beams[beam].l]
-            @inbounds res_[1] += beams[beam].θe            
-            ind += 3
-    end 
-    ind
-end 
-
-function residuals!(res::AbstractVector{T},node::CompliantClamp,beams,beams_end,y,ind) where{T}
-    for (beam,point) in beams_end
-        @inbounds res_ = @view res[ind:ind+2]
-        @inbounds m = node.c *  (y[point][2,beam] - node.ϕ)
-        @inbounds res_[1] .= m .- y[point][1,beam] * normfactor_m(beams[beam])
-        @inbounds res_[2:3] .= node[2:3] .-  y[point][3:4,beam] .*  [beams[beam].l,beams[beam].l]
-       
-        ind += 3
-    end 
-    ind
-end 
-
-function residuals!(residuals,str::Structure,y::T) where{T<:EnsembleSolution}
-    ind = 1
-    con = str.AdjMat
-    for (node,beams) in con.Nodes2Beams
-        ind = residuals!(residuals,con.Nodes[node],str.Beams,beams,y,ind) 
-    end 
-end 
-
-function (str::Structure)(x::Matrix, #x[:,i] = u0 = [m_i,θ_i,x_i<- node_i,y_i <-node_i,fx_i,fy_i,κ = 0]  
-    forplt::Bool = false
-    )
-    prob_func(prob,i,repeat) = remake(prob,u0 = x[:,i])
-
-    output = forplt ? out4plt : out4loss
-    reduct = forplt ? reduction4plt : reduction4loss
     ensprob  =  EnsembleProblem(prob;
-                output_func = output,
                 prob_func = prob_func,
-                reduction = reduct,
-                u_init = forplt ? [] : [similar(x),similar(x)]
                 )
 
     sol = solve(ensprob,str.Solver,
                 EnsembleThreads(),
                 reltol = 1e-12,abstol = 1e-12,
-                save_start = true,save_on = forplt,save_end = true,
+                save_start = true,save_on = false,save_end = true,
                 sensealg=str.SensAlg,
-                trajectories = length(str.Beams)
+                trajectories = length(bn.Beams)
                 )
+    Array(sol),(;Beams = bn.Beams,Nodes = nodes_)
 end
 
-function (str::Structure)(residuals::T,values::T) where{T} #new loss
-    inits = initialize(str,values)
-    sols = str(inits)
-    residuals!(residuals,str,sols)
+function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple, 
+    ::Val{true}
+    ) where{T}
+    nodepos = getstartnodes(str.AdjMat)
+    beams,nodes = bn
+    anz,nodes_ = changestartnodes(bn.Nodes,x)
+    nodes_ = addpositions(nodes,x) 
+    function prob_func(prob,i,repeat) 
+        u0 = initialize_beam(beams,nodes_,x[:,anz+1:end],nodepos,i)
+        remake(prob;u0 = u0)
+    end 
+
+    ensprob  =  EnsembleProblem(prob;prob_func = prob_func)
+
+    sol = solve(ensprob,str.Solver,
+                EnsembleThreads(),
+                reltol = 1e-12,abstol = 1e-12,
+                sensealg=str.SensAlg,
+                trajectories = length(bn.Beams);str.kwargs...
+                )
+end
+(str::Structure)(x::AbstractMatrix,bn,plt::Bool = false) = str(x,bn,Val(plt))
+(str::Structure)(x::AbstractVector,bn,plt::Bool = false) = str(reshape(x,3,:),bn,Val(plt))
+
+
+function (str::Structure)(residuals::T,values::T,bn::NamedTuple) where{T} #new loss
+    sols,bn_ = str(values,bn)
+    residuals!(residuals,str,sols,bn_)
 end 
 
-function (str::Structure)(values::AbstractVector,forplt::Bool = false)
-    inits = initialize(str,values)
-    str(inits,forplt)
+
+
+function getinitials(str::Structure,nb::NamedTuple)
+    nodes = nb.Nodes
+    beams = nb.Beams
+    adjpos = findall(x->!isapprox(x,0),LowerTriangular(str.AdjMat))
+    initsize = 0
+    for ap in adjpos
+        initsize += isa(nodes[ap[2]],Branch) ? 2 : 1
+    end 
+    return  (3,initsize)
 end 
 
-function change_node(str::Structure,node::Int;kwargs...)
-    for (field,value) in kwargs
-        str = Setfield.@set str.AdjMat.Nodes[node].$field = value 
-    end 
-    str 
-end  
+function Base.zeros(::Type{T},str::Structure,nb::NamedTuple) where{T}
+    zeros(T,getinitials(str,nb))
+end 
 
-function change_beam(str::Structure,beam::Int;kwargs...)
-    for (field,value) in kwargs
-        str = Setfield.@set str.Beams[node].$field = value 
-    end 
-    str 
-end  
+function Random.rand(::Type{T},str::Structure,nb::NamedTuple) where{T}
+    rand(T,getinitials(str,nb))
+end 
+# function Base.zeros(::Type{T},strs::Vector{Structure}) where{T}
+#     inits = Vector{Vector{T}}(undef,length(strs))
+#     for ind in eachindex(inits)
+#         inits[ind] = zeros(T,getinitials(strs[ind]))
+#     end 
+#     return inits
+# end 
+
+# function Random.rand(::Type{T},strs::Vector{Structure}) where{T}
+#     inits = Vector{Vector{T}}(undef,length(strs))
+#     for ind in eachindex(inits)
+#         inits[ind] = rand(T,getinitials(strs[ind]))
+#     end 
+#     return inits
+# end 
