@@ -122,7 +122,7 @@ function Optimisers.apply!(o::Optimisers.ClipNorm, state, x::Beam{T}, dx) where 
 end
 
 function ode!(dT,t::AbstractVector{T},p,s) where{T}
-    m,θ,x,y,fx,fy,κ = t
+    @inbounds m,θ,x,y,fx,fy,κ = t
     dT[1] = fx*sin(θ)-fy*cos(θ)   #dM
     dT[2] = m + κ               #dΘ
     dT[3] = cos(θ) #* (1 + T[5]*h̃^2/(12)) #dx
@@ -134,7 +134,7 @@ function ode!(dT,t::AbstractVector{T},p,s) where{T}
 end 
 
 function jac!(t::AbstractArray{T,N},p,s) where{T,N} #jacobi 
-    m,θ,x,y,fx,fy,κ = t
+    @inbounds m,θ,x,y,fx,fy,κ = t
     dT = zeros(T,7,7)
     dT[1,2] = fx*cos(θ) + fy*sin(θ)
     dT[1,5] = sin(θ)
@@ -147,7 +147,7 @@ function jac!(t::AbstractArray{T,N},p,s) where{T,N} #jacobi
 end 
 
 function jac!(dt,t::AbstractArray{T,N},p,s) where{T,N} #jacobi 
-    m,θ,x,y,fx,fy,κ = t
+    @inbounds m,θ,x,y,fx,fy,κ = t
     dt[1,2] = fx*cos(θ) + fy*sin(θ)
     dt[1,5] = sin(θ)
     dt[1,6] = -cos(θ)
@@ -158,7 +158,21 @@ function jac!(dt,t::AbstractArray{T,N},p,s) where{T,N} #jacobi
     return dt
 end
 
-func = ODEFunction{true}(ode!, jac = jac!)
+function vjp!(Jv,v::AbstractArray{T,N},u,p,t) where{T,N} #vjp
+    @inbounds m,θ,x,y,fx,fy,κ = u
+    dt = zeros(T,N,N)
+    Jv = v * jac!(dt,u,p,t) 
+    # Jv[1] = v[1]*fx*cos(θ) + v[2] + v[5]*sin(θ)
+    # Jv[2] = v[1]*(-fx*sin(θ) + fy*cos(θ)) + v[2]*m + v[7]
+    # Jv[3] = v[3]*cos(θ) - v[4]*sin(θ)
+    # Jv[4] = v[3]*sin(θ) + v[4]*cos(θ)
+    # Jv[5] = zero(T)
+    # Jv[6] = zero(T)
+    # Jv[7] = zero(T)
+    return Jv
+end
+
+func = ODEFunction{true}(ode!, jac = jac!,vjp = )
 
 prob = ODEProblem(func,zeros(Float64,7),(0.,1.))
 
