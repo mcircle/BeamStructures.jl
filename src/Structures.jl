@@ -88,7 +88,7 @@ end
 reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where {T} = Vector{T}()
 
 function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
-    idcs = LinearIndices(CartesianIndices((1:3,1:fld(length(residuals),3))))
+    # idcs = LinearIndices(residuals)#CartesianIndices((1:3,1:fld(length(residuals),3))))
     adj = str.AdjMat
     nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
     start = 1
@@ -97,13 +97,13 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
         beams = findbeamsatnode(node,n,nodes)
         res = reduceforceat(node,bn.Beams,y,beams)
         if !isempty(res)
-            residuals[idcs[:,start]] .= res
+            residuals[:,start] .= res
             start += 1
         end 
         res = reduceposat(node,bn.Beams,y,beams)
         if !isempty(res)
             idxs = start:start + size(res,2) - 1
-            residuals[idcs[:,idxs]] .= res
+            residuals[:,idxs] .= res
             start = idxs[end] + 1
         end  
     end
@@ -126,13 +126,20 @@ function changestartnodes(nodes,x)
     nodes_ = addpositions(nodes,x)
     return anz, nodes_
 end 
+
+function toArray(x::AbstractVectorOfArray,pos = [0,1])
+    vecs  = vec.(x(pos))
+    Array(reshape(reduce(hcat,vecs),size(x.u[1],1),length(pos),length(x)))
+end
+
 function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{false}) where{T}
-    nodepos = getstartnodes(str.AdjMat)
+    nodepos = getstartnodes(str)
 
     anz,nodes_ = changestartnodes(bn.Nodes,x)
     function prob_func(prob,i,repeat) 
+        
         u0 = initialize_beam(bn.Beams,nodes_,x[:,anz+1:end],nodepos,i)
-        remake(prob;u0 = u0)
+        remake(prob;u0 = u0,)
     end 
 
     ensprob  =  EnsembleProblem(prob;
@@ -141,21 +148,22 @@ function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{false}) wher
 
     sol = solve(ensprob,str.Solver,
                 EnsembleThreads(),
-                reltol = 1e-12,abstol = 1e-12,
+                reltol = 1e-6,abstol = 1e-6,
                 save_start = true,save_on = false,save_end = true,
                 sensealg=str.SensAlg,
                 trajectories = length(bn.Beams)
                 )
+              
     Array(sol),(;Beams = bn.Beams,Nodes = nodes_)
 end
 
 function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple, 
     ::Val{true}
     ) where{T}
-    nodepos = getstartnodes(str.AdjMat)
+    nodepos = getstartnodes(str)
     beams,nodes = bn
     anz,nodes_ = changestartnodes(bn.Nodes,x)
-    nodes_ = addpositions(nodes,x) 
+    # nodes_ = addpositions(nodes,x) 
     function prob_func(prob,i,repeat) 
         u0 = initialize_beam(beams,nodes_,x[:,anz+1:end],nodepos,i)
         remake(prob;u0 = u0)
@@ -165,7 +173,7 @@ function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,
 
     sol = solve(ensprob,str.Solver,
                 EnsembleThreads(),
-                reltol = 1e-12,abstol = 1e-12,
+                reltol = 1e-6,abstol = 1e-6,
                 sensealg=str.SensAlg,
                 trajectories = length(bn.Beams);str.kwargs...
                 )
@@ -199,18 +207,3 @@ end
 function Random.rand(::Type{T},str::Structure,nb::NamedTuple) where{T}
     rand(T,getinitials(str,nb))
 end 
-# function Base.zeros(::Type{T},strs::Vector{Structure}) where{T}
-#     inits = Vector{Vector{T}}(undef,length(strs))
-#     for ind in eachindex(inits)
-#         inits[ind] = zeros(T,getinitials(strs[ind]))
-#     end 
-#     return inits
-# end 
-
-# function Random.rand(::Type{T},strs::Vector{Structure}) where{T}
-#     inits = Vector{Vector{T}}(undef,length(strs))
-#     for ind in eachindex(inits)
-#         inits[ind] = rand(T,getinitials(strs[ind]))
-#     end 
-#     return inits
-# end 

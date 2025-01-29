@@ -1,8 +1,8 @@
 module BeamStructures
    
     # using DataFrames
-    using JLD2
-    using XLSX
+    # using JLD2
+    # using XLSX
     using LinearAlgebra
     using Statistics
     using DifferentialEquations
@@ -18,10 +18,10 @@ module BeamStructures
     include("Beams.jl")
     include("Boundaries.jl")
     include("Connections.jl")
-    include("utils.jl")
     include("Structures.jl")
     include("GroundStructures.jl")
-    include("Bibliography.jl")
+    include("utils.jl")
+    # include("Bibliography.jl")
     include("ChainRulesExt.jl")
 
     export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand

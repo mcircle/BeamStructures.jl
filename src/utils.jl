@@ -13,10 +13,21 @@ function prepare(args::Vararg{Union{Beam,Boundary},N}) where{N}
     (;Beams = getnames(beams...),Nodes = getnames(bounds...))        
 end 
 
-function getstartnodes(adj::AbstractMatrix)
+function getstartnodes(str::Structure)
+    adj = str.AdjMat
     getindex.(findall(x->!isapprox(x,0),LowerTriangular(adj)),2)
 end 
-
+function getstartnodes(adj::AbstractMatrix{T}) where{T}
+    sz = size(adj,1)-1
+    len = reduce(+,1:sz)
+    nodes = ones(Int,len)
+    ind = 0
+    for i in sz:-1:2
+        ind += i
+        nodes[ind+1:end] .+= 1
+    end 
+    return    nodes
+end 
 @non_differentiable getstartnodes(adj)
 
 indexlength(::Branch) = 6
@@ -30,7 +41,16 @@ function get_index_pars(nodes,inds)
         ind += indexlength(nodes[node])
     end  
     return ind:ind + indexlength(nodes[inds[end]]) - 1
-end 
+end
+
+function gaussfilter(x,μ = 0.,σ = 0.1)    
+   @. exp(-0.5 * ((x - μ) / σ)^2) #./ (σ * sqrt(2π))
+end
+
+function softmax(x,f = 1)
+    f .* exp.(x) ./ (sum(exp,x) + eps(Float32))
+end
+
 
 @non_differentiable get_index_pars(x,inds)
 

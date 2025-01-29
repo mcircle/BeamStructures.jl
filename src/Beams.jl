@@ -66,19 +66,20 @@ Optimisers._trainable(b::Beam{T},fr) where{T} = Beam{T}(merge(Optimisers.mapvalu
 
 Base.zero(::Beam{T}) where{T} = Beam(zeros(T,7)...)
 
-@generated function combine(β,mt::B,dx) where{B<:Beam}
+@generated function combine(β,mt::Beam{T},dx) where{T}
     fields = fieldnames(mt)
-    exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
+    # exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
+    exprs = [:(isnothing(getproperty(dx, $(QuoteNode(f)))) ? zero(T) : β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
     return quote
-        $(Expr(:call,B, exprs...))
+        $(Expr(:call,Beam, exprs...))
     end
 end 
 
-@generated function combineabs2(β,mt::B,dx) where{B<:Beam}
+@generated function combineabs2(β,mt::Beam{T},dx) where{T}
     fields = fieldnames(mt)
-    exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * abs2(getproperty(dx, $(QuoteNode(f))))) for f in fields]
+    exprs = [:(isnothing(getproperty(dx, $(QuoteNode(f)))) ? zero(T) : β * getproperty(mt, $(QuoteNode(f))) + (1-β) * abs2(getproperty(dx, $(QuoteNode(f))))) for f in fields]
     return quote
-        $(Expr(:call,B, exprs...))
+        $(Expr(:call,Beam, exprs...))
     end
 end 
 
@@ -133,7 +134,18 @@ function ode!(dT,t::AbstractVector{T},p,s) where{T}
     return dT
 end 
 
-function jac!(t::AbstractArray{T,N},p,s) where{T,N} #jacobi 
+function ode(t::AbstractVector{T},p,s) where{T}
+    @inbounds m,θ,x,y,fx,fy,κ = t
+    [fx*sin(θ)-fy*cos(θ),   #dM
+    m + κ,               #dΘ
+    cos(θ), #* (1 + T[5]*h̃^2/(12)) #dx
+    sin(θ), #* (1 + T[6]*h̃^2/(12)) #dy
+    zero(T),
+    zero(T),
+    zero(T)]
+end 
+
+function jac(t::AbstractArray{T,N},p,s) where{T,N} #jacobi 
     @inbounds m,θ,x,y,fx,fy,κ = t
     dT = zeros(T,7,7)
     dT[1,2] = fx*cos(θ) + fy*sin(θ)
@@ -151,28 +163,44 @@ function jac!(dt,t::AbstractArray{T,N},p,s) where{T,N} #jacobi
     dt[1,2] = fx*cos(θ) + fy*sin(θ)
     dt[1,5] = sin(θ)
     dt[1,6] = -cos(θ)
-    dt[2,1] = one(T)
-    dt[2,7] = one(T)
+    dt[2,1] = one(T)#
+    dt[2,7] = one(T)#
     dt[3,2] = -sin(θ)
     dt[4,2] = cos(θ)
     return dt
 end
-
-function vjp!(Jv,v::AbstractArray{T,N},u,p,t) where{T,N} #vjp
+# vjp!(Jv,v,p,t) = BeamStructures.vjp!(Jv,v,sol.u[end],p,t)
+function vjp!(Jv,λ::AbstractArray{T,N},u,t) where{T,N} #vjp
+    @inbounds δm,δθ,δx,δy,δfx,δfy,δκ = λ
     @inbounds m,θ,x,y,fx,fy,κ = u
-    dt = zeros(T,N,N)
-    Jv = v * jac!(dt,u,p,t) 
-    # Jv[1] = v[1]*fx*cos(θ) + v[2] + v[5]*sin(θ)
-    # Jv[2] = v[1]*(-fx*sin(θ) + fy*cos(θ)) + v[2]*m + v[7]
-    # Jv[3] = v[3]*cos(θ) - v[4]*sin(θ)
-    # Jv[4] = v[3]*sin(θ) + v[4]*cos(θ)
-    # Jv[5] = zero(T)
-    # Jv[6] = zero(T)
-    # Jv[7] = zero(T)
-    return Jv
+    Jv[1] = -δθ 
+    Jv[2] = -δy * cos(θ) - δx * -sin(θ) - δm * (fx*cos(θ) + fy*sin(θ)) 
+    # Jv[3] = zero(T) 
+    # Jv[4] = zero(T)
+    Jv[5] = -δm  *  sin(θ)
+    Jv[6] = -δm  * -cos(θ) 
+    Jv[7] = -δθ 
+    # Jv .+= 
+    return nothing 
+end
+function vjp!(Jv,λ::AbstractArray{T,N},u::ODESolution,t) where{T,N} #vjp
+    @inbounds δm,δθ,δx,δy,δfx,δfy,δκ = λ
+    @inbounds m,θ,x,y,fx,fy,κ = u(t)
+    Jv[1] = -δθ 
+    Jv[2] = -δy * cos(θ) - δx * -sin(θ) - δm * (fx*cos(θ) + fy*sin(θ)) 
+    # Jv[3] = zero(T) 
+    # Jv[4] = zero(T)
+    Jv[5] = -δm  *  sin(θ)
+    Jv[6] = -δm  * -cos(θ) 
+    Jv[7] = -δθ 
+
+    return nothing 
 end
 
-func = ODEFunction{true}(ode!, jac = jac!,vjp = )
+func = ODEFunction{true}(ode!, jac = jac!)
 
-prob = ODEProblem(func,zeros(Float64,7),(0.,1.))
+prob = ODEProblem(func,zeros(Float32,7),(0f0,1f0))
+
+vjpfunc = ODEFunction(vjp!)
+vjpprob = ODEProblem(vjpfunc,ones(Float32,7),(1f0,0f0))
 
