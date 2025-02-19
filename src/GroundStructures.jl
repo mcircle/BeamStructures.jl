@@ -11,7 +11,7 @@ function GroundStructure(;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kw
     GroundStructure(solver,sensalg,kwargs)
 end 
 
-function (str::GroundStructure)(x::AbstractMatrix{T},bn::NamedTuple,adj,::Val{false}) where{T}
+function (str::GroundStructure)(x::AbstractMatrix{T},bn::NamedTuple,adj,saveat::Union{AbstractFloat,AbstractVector}) where{T}
     x_ = reshape(x,3,:)
 
     nodepos = getstartnodes(adj)
@@ -28,43 +28,21 @@ function (str::GroundStructure)(x::AbstractMatrix{T},bn::NamedTuple,adj,::Val{fa
 
     sol = solve(ensprob,str.Solver,
                 EnsembleThreads(),
-                reltol = 1e-12,abstol = 1e-12,
-                save_start = true,save_on = false,save_end = true,
+                reltol = 1e-12,abstol = 1e-12,saveat = saveat,
+                save_start = true,save_on = true,save_end = true,
                 sensealg=str.SensAlg,
                 trajectories = cbeams
                 )
-    st = admittance_matrix(sol,adj,str)
-    Array(sol),(;Beams = bn.Beams,Nodes = nodes_),st
-end
-
-function (str::GroundStructure)(x::AbstractMatrix{T},bn::NamedTuple,adj,::Val{true}) where{T}
-    cbeams = reduce(+,1:size(adj,1)-1)
-    nodepos = getstartnodes(adj)
-
-    anz,nodes_ = changestartnodes(bn.Nodes,x)
-
-    function prob_func(prob,i,repeat) 
-        u0 = initialize_beam(bn.Beams,nodes_,x[:,anz+1:end],nodepos,i)
-        remake(prob;u0 = u0)
-    end 
-
-    ensprob  =  EnsembleProblem(prob;
-                prob_func = prob_func)
-
-    sol = solve(ensprob,str.Solver,
-                EnsembleThreads(),
-                reltol = 1e-6,abstol = 1e-6,
-                sensealg=str.SensAlg,
-                trajectories = cbeams;str.kwargs...)
+    sol,(;Beams = bn.Beams,Nodes = nodes_)
 end
 
 function reduction_func_admittance!(u,data,I,adj)
     for ((i,j),d0) in zip(I,data)
-        d = d0 .*adj[i,j]
-        u[i,j,:] .-= d 
-        u[j,i,:] .-= d 
-        u[i,i,:] .+= d
-        # u[j,j,:] .+= d 
+        d = 1 ./ d0  .* adj[i,j]
+        u[i,j,:] .+= d 
+        u[j,i,:] .+= d 
+        # u[i,i,:] .-= d
+        u[j,j,:] .-= d 
     end 
     u,false
 end 
@@ -111,22 +89,34 @@ function admittance_matrix(sol::EnsembleSolution{T,N,S},adj,str) where{T,N,S}
     return sol
 end 
 
-(str::GroundStructure)(x::AbstractMatrix,bn,adj,plt::Val) = str(x,bn,adj,plt)
-(str::GroundStructure)(x::AbstractVector,bn,adj,plt::Val) = str(reshape(x,3,:),bn,adj,plt)
-
-function (str::GroundStructure)(x,bn,adj,plt::Bool = false)
+function check_structure(bn,adj)
     cbeams = reduce(+,1:size(adj,1)-1)
     @assert cbeams == length(bn.Beams) "Missing Beams! Need $(cbeams) and got only $(length(bn.Beams))"
     @assert size(adj,1) == length(bn.Nodes) "Missing Nodes! Need $(size(adj,1)) and got only $(length(bn.Nodes))"
-    ci = getindices(size(adj,1))
-    str(x,bn,adj,Val(plt))
 end 
 
+function (str::GroundStructure)(x::AbstractMatrix,bn,adj,saveat,::Val{false})
+    check_structure(bn,adj)
+    x = str(x,bn,adj,saveat)
+    sol,bn_ = x
+    # st = admittance_matrix(sol,adj,str)
+    sol,bn_#,st
+end 
+
+function (str::GroundStructure)(x::AbstractMatrix,bn,adj,saveat,::Val{true})
+    check_structure(bn,adj)
+    sol,bn_ = str(x,bn,adj,saveat)
+    sol
+end 
+
+(str::GroundStructure)(x::AbstractMatrix,bn,adj,plt::Bool = false,saveat::Union{Real,AbstractVector} = []) = str(x,bn,adj,saveat,Val(plt))
+(str::GroundStructure)(x::AbstractVector,bn,adj,plt::Bool = false,saveat =[]) = str(reshape(x,3,:),bn,adj,saveat,Val(plt))
+
 function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{T},beamnbrs) where{T}
-    res = map((ind)-> factors[ind] .* ([node.ϕ,node.x,node.y] .- scalepos(beams[ind],y[2:4,2,ind],Val(2))),beamnbrs[1])#,init = zeros(T,3))./length(beamnbrs[1])
+    res = map((ind)-> factors[ind] .* ([node.ϕ,node.x,node.y] .- scalepos(beams[ind],y[2:4,2,ind],Val(2))),beamnbrs[1])
     reduce(hcat,res)
 end
-#at Clamp force is equal to surounding
+#at Clamp, force is equal to surounding
 reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},facs::AbstractVector{T},beamsidxs) where {T} = Vector{T}()
 
 function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{T},beamsidxs) where{T}
@@ -158,3 +148,8 @@ function residuals!(residuals::Matrix,adj::AbstractMatrix{T},y::AbstractArray{T,
     end
     residuals 
 end 
+
+function residuals!(residuals::Matrix,adj::AbstractMatrix{T},y::EnsembleSolution,bn) where{T}
+    y = toArray(y)
+    residuals!(residuals,adj,y,bn)
+end

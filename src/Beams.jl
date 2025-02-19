@@ -188,11 +188,21 @@ function vjp!(Jv,λ::AbstractArray{T,N},u::ODESolution,t) where{T,N} #vjp
     @inbounds m,θ,x,y,fx,fy,κ = u(t)
     Jv[1] = -δθ 
     Jv[2] = -δy * cos(θ) - δx * -sin(θ) - δm * (fx*cos(θ) + fy*sin(θ)) 
-    # Jv[3] = zero(T) 
-    # Jv[4] = zero(T)
     Jv[5] = -δm  *  sin(θ)
     Jv[6] = -δm  * -cos(θ) 
     Jv[7] = -δθ 
+
+    return nothing 
+end
+
+function vjp2!(Jv,λ::AbstractArray{T,N},u::ODESolution,t) where{T,N} #vjp
+    @inbounds δm,δθ,δx,δy,δfx,δfy,δκ = λ
+    @inbounds m,θ,x,y,fx,fy,κ = u(t)
+    # Jv[1] = -δθ 
+    Jv[2] = - δy * -sin(θ) - δx * -cos(θ) - δm * (-fx*sin(θ) + fy*cos(θ)) 
+    Jv[5] = -δm  *  cos(θ)
+    Jv[6] = -δm  * sin(θ) 
+    # Jv[7] = -δθ 
 
     return nothing 
 end
@@ -204,3 +214,5 @@ prob = ODEProblem(func,zeros(Float32,7),(0f0,1f0))
 vjpfunc = ODEFunction(vjp!)
 vjpprob = ODEProblem(vjpfunc,ones(Float32,7),(1f0,0f0))
 
+vjp2func = ODEFunction(vjp!)
+vjp2prob = ODEProblem(vjpfunc,ones(Float32,7),(1f0,0f0))

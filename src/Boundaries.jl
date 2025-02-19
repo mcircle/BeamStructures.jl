@@ -1,6 +1,5 @@
 
 abstract type Boundary{T} end
-
 struct Clamp{A<:Real} <:Boundary{A}
     x::A
     y::A
@@ -83,6 +82,7 @@ struct Slider{A<:Real} <:Boundary{A}
     fx::A
     fy::A
     mz::A
+    f::Function
     function Slider(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
         new{T}(x,y,ϕ,fx,fy,mz)
     end 
