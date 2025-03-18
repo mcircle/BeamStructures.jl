@@ -11,7 +11,9 @@ module BeamStructures
     using Random
     using Optimisers
     using ChainRulesCore: rrule,Tangent, NoTangent, ZeroTangent, @thunk ,@non_differentiable,InplaceableThunk
+    using InteractiveUtils
     import ChainRulesCore as CRC
+
     # using ComponentArrays
     
     

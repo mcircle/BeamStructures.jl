@@ -35,7 +35,7 @@ end
 function initialize_beam(node::CompliantClamp,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0, = node.x,node.y,node.ϕ
     l,κ = beam.l,beam.κ0
-    m = node.c * (beam.θs .- parameters[1]) .* normfactor_m(beam)
+    m = node.cz * (beam.θs .- parameters[1]) .* normfactor_m(beam)
     fx = parameters[2] * normfactor_f(beam) #am Balkenelement
     fy = parameters[2] * normfactor_f(beam) #am Balkenelement
     return [m,θ0 + beam.θs + parameters[1],x./l,y./l,fx,fy,κ*l]
@@ -65,6 +65,16 @@ function initialize_beam(node::ExtForces,beam::Beam,parameters::AbstractVector{T
     return [m,θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,fx,fy,κ*l]
 end 
 
+function initialize_beam(node::Movable,beam::Beam,parameters::AbstractVector{T}) where {T}
+    x,y,θ0 = node.x,node.y,node.ϕ
+    l,θs,κ = beam.l,beam.θs,beam.κ0
+    mz,fx,fy = node.trans .* parameters
+    m = mz .* normfactor_m(beam) #am Balkenelement
+    fx = fx .* normfactor_f(beam) #am Balkenelement
+    fy = fy .* normfactor_f(beam) #am Balkenelement
+    return [m,θ0 + θs,x./l,y./l,fx,fy,κ*l]
+end
+
 function initialize_beam(beams::NamedTuple,nodes::NamedTuple,x,nodepos,i::Int)
     initialize_beam(nodes[nodepos[i]],beams[i],x[:,i])
 end 
@@ -74,25 +84,69 @@ scalepos(beam::Beam,y::AbstractArray,::Val{1})  = [y[1] - beam.θs,y[2].*beam.l,
 
 function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},beamnbrs) where{T}
     res = map(x-> [node.ϕ,node.x,node.y] .- scalepos(beams[x],y[2:4,2,x],Val(2)),beamnbrs[1])
+    if isempty(res)
+        return Vector{T}()
+    end
+    reduce(hcat,res)
+end
+dir_vector(node::LinearSlider) = [cos(node.dir),sin(node.dir)]
+function reduceposat(node::LinearSlider,beams::NamedTuple,y::AbstractArray{T,3},beamnbrs) where{T}
+    ϕ = node.ϕ
+    x,y = node.p0 .+ s .* dir_vector(node)
+    res = map(x-> [ϕ,x,y] .- scalepos(beams[x],y[2:4,2,x],Val(2)),beamnbrs[1])
+    reduce(hcat,res)
+end
+
+function reduceposat(node::Joint,beams::NamedTuple,y::AbstractArray{T,3},beamnbrs) where{T}
+    ϕ = node.ϕ
+    x,y = node.p0 .+ node.s .* dir_vector(node)
+    res = map(x-> [ϕ,x,y] .- scalepos(beams[x],y[2:4,2,x],Val(2)),beamnbrs[1])
     reduce(hcat,res)
 end
 
 scaleforce(beam,y) =  y ./normvector(beam)
-
 function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T}
     solp = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = zeros(T,3))
     solm = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = zeros(T,3)) 
-    return solp .- solm .+ node[[6,4,5]]
+    return solp .- solm 
 end 
+function dir_matrix(node::LinearSlider{T}) where{T} 
+    mat = zeros(T,3,3)
+    mat[1] = one(T)
+    mat[2:3,2] .= [cos(node.dir),sin(node.dir)]
+    return mat
+end 
+function reduceforceat(node::LinearSlider{TN},Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T,TN}
+    solp = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = zeros(T,3))
+    solm = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = zeros(T,3)) 
+    return dir_matrix(node) * (solp .- solm) 
+end
 
+function reduceforceat(node::Joint{TN},Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T,TN}
+    solp = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = zeros(T,3))
+    solm = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = zeros(T,3)) 
+    return [1,0,0] .* (solp .- solm) 
+end
 reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where {T} = Vector{T}()
+
+function getnodeswithbeams(adj::AbstractMatrix,nodes::NamedTuple)
+    nodeswithbeams = Vector{Int}()
+    for ap in axes(adj,1)
+        if isa(nodes[ap],Branch) 
+            push!(nodeswithbeams,ap)
+        elseif isa(nodes[ap],Clamp) && ap > 1 && sum(adj[1:ap,ap]) > 0 
+            push!(nodeswithbeams,ap)
+        end
+    end 
+    return nodeswithbeams
+end    
 
 function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
     # idcs = LinearIndices(residuals)#CartesianIndices((1:3,1:fld(length(residuals),3))))
     adj = str.AdjMat
     nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
     start = 1
-    for n in unique(first.(Tuple.(nodes)))
+    for n in getnodeswithbeams(adj,bn.Nodes)
         node = bn.Nodes[n]
         beams = findbeamsatnode(node,n,nodes)
         res = reduceforceat(node,bn.Beams,y,beams)
@@ -111,8 +165,10 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
 end 
 
 addposition(node::BT,pos::AbstractVector{T}) where{T,BT<:Boundary{T}} =node + BT(pos...,zeros(T,3)...)
-addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb}} =gettype(node)(T.(node[1:6])...)+ gettype(node)(pos...,zeros(T,3)...)
-
+addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb}} =BT(T.(node[1:6])...) + BT(pos...,zeros(T,3)...)
+addposition(node::Clamp,pos) = node
+addposition(node::LinearSlider,pos::AbstractVector{T}) where{T}  = LinearSlider{T}(node[1:3]...,pos[1]) 
+addposition(node::Joint,pos::AbstractVector{T}) where{T}  = Joint{T}(node[1:2]...,pos[1]) 
 addposition(node::Boundary,pos::Nothing)  = node
 
 function addpositions(nodes::NamedTuple,x::AbstractMatrix)
@@ -193,10 +249,11 @@ function getinitials(str::Structure,nb::NamedTuple)
     nodes = nb.Nodes
     beams = nb.Beams
     adjpos = findall(x->!isapprox(x,0),LowerTriangular(str.AdjMat))
-    initsize = 0
-    for ap in adjpos
-        initsize += isa(nodes[ap[2]],Branch) ? 2 : 1
-    end 
+    initsize = length(beams) + sum(x->isa(x,Branch),values(nodes))
+    # for ap in adjpos
+    #     initsize += isa(nodes[ap[2]],Branch) ? 1 : 0
+    # end 
+
     return  (3,initsize)
 end 
 

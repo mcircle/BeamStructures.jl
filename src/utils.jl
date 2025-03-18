@@ -58,7 +58,7 @@ switchCI(a::CartesianIndex{2}) = CartesianIndex((a[2],a[1]))
 @non_differentiable switchCI(a)
 
 findbeamsatnode(::Clamp,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x-> x[1] == node,nodes),Vector{Int}())
-findbeamsatnode(::Branch,node::Int,nodes::AbstractVector{CartesianIndex{2}}) =  (findall(x->x[1] == node,nodes),findall(x-> x[2] == node,nodes))
+findbeamsatnode(::Branch,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x->x[1] == node,nodes),findall(x-> x[2] == node,nodes))
 
 normfactor_m(b::Beam) = 12* b.l/(b.E*b.w*b.h^3) 
 normfactor_f(b::Beam) = b.l * normfactor_m(b) 

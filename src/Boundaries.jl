@@ -1,5 +1,8 @@
 
-abstract type Boundary{T} end
+# abstract type AbstractBoundary{T} end
+abstract type Boundary{T} end #extern
+# abstract type Movable{A<:Real} <:AbstractBoundary{A} end 
+
 struct Clamp{A<:Real} <:Boundary{A}
     x::A
     y::A
@@ -7,17 +10,15 @@ struct Clamp{A<:Real} <:Boundary{A}
     fx::A
     fy::A
     mz::A
-    function Clamp(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
+    function Clamp(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T<:Real}
         new{T}(x,y,ϕ,fx,fy,mz)
     end 
-    Clamp{T}(x,y,ϕ,fx,fy,mz) where{T} = new{T}(x,y,ϕ,fx,fy,mz)
-    
+    Clamp{T}(x,y,ϕ,fx,fy,mz) where{T<:Real} = new{T}(x,y,ϕ,fx,fy,mz)
 end 
-Clamp(x::AbstractVector) = Clamp(x...)
-(cl::Clamp{T})(::Type{T}) where{T} = cl
-(cl::Clamp{X})(::Type{T}) where{X,T} = Clamp{T}(cl[1:6]...)
+Clamp(x,y,ϕ,fx,fy,mz) = Clamp(promote(x,y,ϕ,fx,fy,mz)...)
+(cl::Clamp{T})(displacement) where{T} = cl
 
-gettype(::Clamp{T}) where{T} = Clamp
+
 struct Branch{A<:Real} <:Boundary{A}
     x::A
     y::A
@@ -25,17 +26,16 @@ struct Branch{A<:Real} <:Boundary{A}
     fx::A
     fy::A
     mz::A
-    function Branch(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
+    function Branch(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T<:Real}
         new{T}(x,y,ϕ,fx,fy,mz)
     end 
-    Branch{T}(x,y,ϕ,fx,fy,mz) where{T} = new{T}(x,y,ϕ,fx,fy,mz)
-
+    function Branch{T}(x::D,y::D,ϕ::D,fx::D,fy::D,mz::D) where{D<:Real,T<:Real} 
+        t = promote_type(T,D)
+        new{t}(x,y,ϕ,fx,fy,mz)
+    end 
 end
-Branch(x::AbstractVector) = Branch(x...)
-(cl::Branch{T})(::Type{T}) where{T} = cl
-(cl::Branch{X})(::Type{T}) where{X,T} = Branch{T}(cl[1:6]...)
-gettype(::Branch{T}) where{T} = Branch
-
+(cl::Branch{T})(displacement) where{T} = cl
+Branch(x,y,ϕ,fx,fy,mz) = Branch(promote(x,y,ϕ,fx,fy,mz)...)
 
 struct Free{A<:Real} <:Boundary{A}
     x::A
@@ -44,17 +44,12 @@ struct Free{A<:Real} <:Boundary{A}
     fx::A
     fy::A
     mz::A
-    function Free(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
+    function Free(x::T = 0,y::T = zero(T),ϕ::T = zero(T),fx::T = zero(T),fy::T = zero(T),mz::T = zero(T)) where{T<:Real}
         new{T}(x,y,ϕ,fx,fy,mz)
     end 
+    Free{T}(x,y = zero(T),ϕ = zero(T),fx = zero(T),fy = zero(T),mz = zero(T)) where{T<:Real} = new{T}(x,y,ϕ,fx,fy,mz)
 end
-Free(x::AbstractVector) = Free(x...)
-Free{T}(args...) where{T} = Free(T.(args)...)
-gettype(::Free{T}) where{T} = Free
-# function Free(x::X,y::Y,ϕ::P,fx::FX,fy::FY,mz::MZ) where {X,Y,P,FX,FY,MZ}
-#     p = promote(x,y,ϕ,fx,fy,mz)
-#     Free(p...)
-# end  
+(cl::Free{T})(displacement) where{T} = cl
 
 struct ExtForces{A<:Real} <: Boundary{A}
     x::A
@@ -67,57 +62,83 @@ struct ExtForces{A<:Real} <: Boundary{A}
         new{T}(x,y,ϕ,fx,fy,mz)
     end 
 end
-ExtForces(x::AbstractVector) = ExtForces(x...)
-ExtForces{T}(args...) where{T} = ExtForces(T.(args)...)
-gettype(::ExtForces{T}) where{T} = ExtForces
-# function ExtForces(x::X,y::Y,ϕ::P,fx::FX,fy::FY,mz::MZ) where {X,Y,P,FX,FY,MZ}
-#     p = promote(x,y,ϕ,fx,fy,mz)
-#     ExtForces(p...)
-# end  
+(cl::ExtForces{T})(displacement) where{T} = cl[1:6]
 
-struct Slider{A<:Real} <:Boundary{A}
+struct LinearSlider{A<:Real} <:Boundary{A}
+    x::A
+    y::A
+    dir::A
+    ϕ::A
+    s::A
+    fx::A
+    fy::A
+    mz::A
+    function LinearSlider(x::T,y::T,dir::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
+        new{T}(x,y,dir,ϕ,zero(T))
+    end 
+end
+
+struct Joint{A<:Real} <:Boundary{A}
     x::A
     y::A
     ϕ::A
     fx::A
     fy::A
-    mz::A
-    f::Function
-    function Slider(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
+    function Joint(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
         new{T}(x,y,ϕ,fx,fy,mz)
     end 
 end
-Slider(x::AbstractVector) = Slider(x...)
-Slider{T}(args...) where{T} = Slider(T.(args)...)
-gettype(::Slider{T}) where{T} = Slider
-# function Slider(x::X,y::Y,ϕ::P,fx::FX,fy::FY,mz::MZ) where {X,Y,P,FX,FY,MZ}
-#     p = promote(x,y,ϕ,fx,fy,mz)
-#     Slider(p...)
-# end  
 
-Base.length(b::Boundary) = 6
-Base.getindex(b::Boundary,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Clamp)[idx])
-Base.getindex(b::Boundary,idx::Int) = getfield(b,fieldnames(Clamp)[idx])
-Base.iterate(b::Boundary,i::Int = 1) = i > 6 ? nothing : (getfield(b,i),i+1)
-Base.IteratorSize(b::T) where{T<:Boundary} = Base.HasLength()
+# Eine Funktion f(s) -> x,y,ϕ,trans notwendig
+mutable struct Movable{A<:Real} <:Boundary{A}
+    x::A
+    y::A
+    ϕ::A
+    trans::AbstractMatrix{A}
+    fx::A
+    fy::A
+    mz::A
+    function Movable(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
+        new{T}(x,y,ϕ,Diagonal(ones(T,3)),fx,fy,mz)
+    end 
+end
+
 
 struct CompliantClamp{A} <:Boundary{A}
     x::A
     y::A
     ϕ::A
-    fx::A
-    fy::A
-    c::A
-    function CompliantClamp(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
-        new{T}(x,y,ϕ,fx,fy,mz)
+    cx::A
+    cy::A
+    cz::A
+    function CompliantClamp(x::T,y::T,ϕ::T,cx::T,cy::T,cz::T) where{T}
+        new{T}(x,y,ϕ,cx,cy,cz)
     end 
 end
-CompliantClamp(x::AbstractVector) = CompliantClamp(x...)
-CompliantClamp{T}(args...) where{T} = CompliantClamp(T.(args)...)
-gettype(::CompliantClamp{T}) where{T} = CompliantClamp
+(cl::CompliantClamp{T})(displacement) where{T} = cl[1:6]
 
-function (::Type{B} )(x::NamedTuple) where{B<:Boundary{<:Real}}
-    B(map(k->getfield(x,k),keys(x))...)
+
+
+
+gettype(::B) where{T,B<:Boundary{T}} = B
+
+(::Type{B})(x::AbstractVector) where{T,B<:Boundary{T}} = B(T.(x)...)
+(::Type{B})(x::AbstractVector) where{B<:Boundary} = B(x...)
+
+
+Base.length(::B) where{B<:Boundary} = fieldcount(B)
+Base.lastindex(::B) where{B<:Boundary} = fieldcount(B)
+Base.getindex(b::Boundary,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Clamp)[idx])
+Base.getindex(b::Boundary,idx::Int) = getfield(b,fieldnames(Clamp)[idx])
+Base.iterate(b::B,i::Int = 1) where{B<:Boundary} = i > length(b) ? nothing : (getfield(b,i),i+1)
+Base.IteratorSize(b::T) where{T<:Boundary} = Base.HasLength()
+
+function (b::Type{B})(x::NamedTuple) where{B<:Boundary}
+    B(map(k->getfield(x,k),fieldnames(b))...)
+end 
+
+function (b::Type{B})(x::NamedTuple) where{T,B<:Boundary{T}}
+    B(map(k->getfield(x,k),fieldnames(b))...)
 end 
 
 function change_node(node::Boundary;kwargs...)
@@ -141,9 +162,11 @@ Base.:abs2(b::T) where{T<:Boundary} = b*b
 Base.:/(a::Real,b::T) where{T<:Boundary} = T(a ./ b...)
 Base.:/(b::T,a::Real)where{T<:Boundary} = T(b ./ a...)
 
-Base.:+(a::T,b::NamedTuple) where{T<:Boundary} = T(map(x->isnothing(getfield(b,x)) ? getfield(a,x) : getfield(a,x) + getfield(b,x),keys(b))...)
+function Base.:+(a::T,b::NamedTuple) where{T<:Boundary} 
+    T(map(x->hasproperty(b,x) ? getfield(a,x) + getfield(b,x) : getfield(a,x),fieldnames(T))...)
+end
 
-Optimisers.functor(x::T) where{T<:Boundary} = (NamedTuple{fieldnames(T)}(x[1:6]),T)
+Optimisers.functor(x::T) where{T<:Boundary} = (NamedTuple{fieldnames(T)}(x[1:end]),T)
 Optimisers.init(o::Adam, x::B) where{B<:Boundary{T}} where{T}  = (B(zeros(T,6)...), B(zeros(T,6)...), T.(o.beta))
 Optimisers.init(o::WeightDecay, x::Boundary) = nothing
 Optimisers.isnumeric(x::T) where{T<:Boundary} = true
@@ -190,11 +213,25 @@ function Optimisers.apply!(o::Adam,state,b::BT,dx) where{BT<:Boundary{T}} where{
     return (mt, vt, βt .* β), dx′
 end 
 
-function Optimisers.apply!(o::WeightDecay, state, x::BT, dx) where{BT<:Boundary{T}} where{T}
-    λ = T(o.lambda)
-    dx′ = dx + λ * x
+Optimisers.init(o::AdamW, x::Bo) where {T,Bo<:Boundary{T}} = (Bo(zeros(T,6)...), Bo(zeros(T,6)...), T.(o.beta))
+
+function Optimisers.apply!(o::AdamW, state, x::Bo, dx) where {T,Bo<:Boundary{T}}
+    η, β, ϵ, λ = T(o.eta), T.(o.beta), T(o.epsilon), T(o.lambda)
+    mt, vt, βt = state
   
-    return state, BT(dx′...)
+    # standard Adam update with learning rate eta=1
+    mt = combine(β[1],mt,dx)
+    vt = combineabs2(β[2],vt,dx)
+    dx′ = combine(η,βt,mt,vt,ϵ)
+  
+    # apply learning rate and weight decay
+    if o.couple
+      dx′′ =  η * (dx′ + λ * x)
+    else
+      dx′′ =  η * dx′ + λ * x
+    end
+  
+    return (mt, vt, βt .* β), dx′′
 end
 
 Optimisers.init(o::Optimisers.ClipNorm, x::Boundary) = nothing

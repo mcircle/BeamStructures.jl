@@ -114,6 +114,9 @@ end
 
 function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{T},beamnbrs) where{T}
     res = map((ind)-> factors[ind] .* ([node.ϕ,node.x,node.y] .- scalepos(beams[ind],y[2:4,2,ind],Val(2))),beamnbrs[1])
+    if isempty(res)
+        return Vector{T}()
+    end
     reduce(hcat,res)
 end
 #at Clamp, force is equal to surounding
@@ -128,10 +131,12 @@ end
 function residuals!(residuals::Matrix,adj::AbstractMatrix{T},y::AbstractArray{T,3},bn) where{T}
     
     ids = getindices(size(adj,1))
+    adj_ = ifelse.(adj .> 1,1,adj)
+    adj_ = ifelse.(adj_ .< 0,0,adj)
     # idcs = LinearIndices(residuals)
     nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
     start = 1
-    for n in unique(first.(Tuple.(nodes)))
+    for n in getnodeswithbeams(adj,bn.Nodes)
         node = bn.Nodes[n]
         beams = findbeamsatnode(node,n,nodes)
         res = reduceforceat(node,bn.Beams,y,adj[ids],beams)

@@ -6,6 +6,10 @@ struct Beam{T<:Real}
     E::Union{T,Nothing}
     θs::Union{T,Nothing}
     θe::Union{T,Nothing}
+    function Beam(l::T,h::T,w::T,κ0::T,E::T,θs::T,θe::T) where{T}
+        new{T}(l,h,w,κ0,E,θs,θe)
+    end
+    Beam{T}(l,h,w,κ0,E,θs,θe) where{T} = new{T}(l,h,w,κ0,E,θs,θe)
 end 
 
 function Beam(l,h,w,κ0;E = 2.1f5,θs = 0,θe = θs + l*κ0)
@@ -16,12 +20,16 @@ function Beam{T}(l,h,w,κ0;E = 2.1f5,θs = 0f0,θe = θs + l*κ0) where{T}
     Beam{T}(l,h,w,κ0,E,θs,θe)
 end 
 
+function Beam{T}(l::D,h::D,w::D,κ0::D,E::D,θs::D,θe::D) where{T,D}
+    Beam(l,h,w,κ0,E,θs,θe)
+end
+
 function Beam{T}(nt::NamedTuple) where{T}
-    Beam{T}(nt.l,nt.h,nt.w,nt.κ0,nt.E,nt.θs,nt.θe)
+    Beam{T}((map(k->getfield(nt,k),fieldnames(Beam))...))
 end 
     
-function (b::Beam{T})(nt) where{T}
-    Beam{T}(nt)
+function (b::Beam{T})(nt::AbstractVector) where{T}
+    Beam{T}(nt...)
 end 
 
 function Base.show(io::IO,beam::Beam)
@@ -101,6 +109,10 @@ function Optimisers.apply!(o::Adam,state,b::Beam{T},dx) where{T}
     return (mt, vt, βt .* β), dx′
 end 
 
+Optimisers.init(o::AdamW, x::Beam{T}) where T = (Beam{T}(zeros(T,4)...), Beam{T}(zeros(T,4)...), T.(o.beta))
+
+
+
 function Optimisers.apply!(o::WeightDecay, state, x::Beam{T}, dx) where{T}
     λ = T(o.lambda)
     dx′ = dx + λ * x
@@ -121,6 +133,27 @@ function Optimisers.apply!(o::Optimisers.ClipNorm, state, x::Beam{T}, dx) where 
 #   @show Beam{T}(dx * λ...)
   return state, λ * Beam{T}(dx) 
 end
+
+function Optimisers.apply!(o::AdamW, state, x::Beam{T}, dx) where T
+    η, β, ϵ, λ = T(o.eta), T.(o.beta), T(o.epsilon), T(o.lambda)
+    mt, vt, βt = state
+  
+    # standard Adam update with learning rate eta=1
+    mt = combine(β[1],mt,dx)
+    vt = combineabs2(β[2],vt,dx)
+    dx′ = combine(η,βt,mt,vt,ϵ)
+  
+    # apply learning rate and weight decay
+    if o.couple
+      dx′′ =  η * (dx′ + λ * x)
+    else
+      dx′′ =  η * dx′ + λ * x
+    end
+  
+    return (mt, vt, βt .* β), dx′′
+end
+
+
 
 function ode!(dT,t::AbstractVector{T},p,s) where{T}
     @inbounds m,θ,x,y,fx,fy,κ = t
