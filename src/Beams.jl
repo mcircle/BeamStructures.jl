@@ -44,6 +44,7 @@ function change_beam(beam::Beam;kwargs...)
 end  
 
 Base.length(b::Beam) = 7
+Base.lastindex(b::Beam) = 7
 Base.getindex(b::Beam,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Beam)[idx])
 Base.getindex(b::Beam,idx::Int) = getfield(b,fieldnames(Beam)[idx])
 Base.iterate(b::Beam,i::Int = 1) = i > 7 ? nothing : (getfield(b,i),i+1)
@@ -155,16 +156,16 @@ end
 
 
 
-function ode!(dT,t::AbstractVector{T},p,s) where{T}
-    @inbounds m,θ,x,y,fx,fy,κ = t
-    dT[1] = fx*sin(θ)-fy*cos(θ)   #dM
-    dT[2] = m + κ               #dΘ
-    dT[3] = cos(θ) #* (1 + T[5]*h̃^2/(12)) #dx
-    dT[4] = sin(θ) #* (1 + T[6]*h̃^2/(12)) #dy
-    dT[5] = zero(T)
-    dT[6] = zero(T)
-    dT[7] = zero(T)
-    return dT
+function ode!(dU,u::AbstractVector{T},p,s) where{T}
+    @inbounds m,θ,x,y,fx,fy,κ = u
+    dU[1] = fx*sin(θ)-fy*cos(θ)   #dM
+    dU[2] = m + κ               #dΘ
+    dU[3] = cos(θ) #* (1 + T[5]*h̃^2/(12)) #dx
+    dU[4] = sin(θ) #* (1 + T[6]*h̃^2/(12)) #dy
+    dU[5] = zero(T)
+    dU[6] = zero(T)
+    dU[7] = zero(T)
+    return dU
 end 
 
 function ode(t::AbstractVector{T},p,s) where{T}
@@ -206,37 +207,39 @@ end
 function vjp!(Jv,λ::AbstractArray{T,N},u,t) where{T,N} #vjp
     @inbounds δm,δθ,δx,δy,δfx,δfy,δκ = λ
     @inbounds m,θ,x,y,fx,fy,κ = u
-    Jv[1] = -δθ 
-    Jv[2] = -δy * cos(θ) - δx * -sin(θ) - δm * (fx*cos(θ) + fy*sin(θ)) 
-    # Jv[3] = zero(T) 
-    # Jv[4] = zero(T)
-    Jv[5] = -δm  *  sin(θ)
-    Jv[6] = -δm  * -cos(θ) 
-    Jv[7] = -δθ 
-    # Jv .+= 
+    
+    Jv[1] = δθ 
+    Jv[2] = δy * cos(θ) - δx * sin(θ) + δm * (fx*cos(θ) + fy*sin(θ)) 
+    Jv[5] = δm  *  sin(θ)
+    Jv[6] = -δm  * cos(θ) 
+    Jv[7] = δθ 
     return nothing 
 end
+
+# function vjp!(Jv,λ::AbstractArray{T,N},u::ODESolution,t) where{T,N} #vjp
+#     δm = @view λ[1,:]
+#     δθ = @view λ[2,:]
+#     δx = @view λ[3,:]
+#     δy = @view λ[4,:]
+#     δfx = @view λ[5,:]
+#     δfy = @view λ[6,:]
+#     # δκ = @view λ[7,:]
+#     @inbounds m,θ,x,y,fx,fy,κ = u(t)
+    
+#     Jv[1,:] .= -δθ
+#     @. Jv[2,:] = -δy * cos(θ) + δx * sin(θ) - δm * (fx*cos(θ) + fy*sin(θ)) 
+#     # Jv[3,:] .= -δx * sin(θ)    
+#     # Jv[4,:] .= δy * cos(θ)    
+#     Jv[5,:] .= -δm  .* sin(θ)
+#     Jv[6,:] .= δm  .* cos(θ) 
+#     Jv[7,:] .= -δθ 
+
+#     return nothing 
+# end
 function vjp!(Jv,λ::AbstractArray{T,N},u::ODESolution,t) where{T,N} #vjp
-    @inbounds δm,δθ,δx,δy,δfx,δfy,δκ = λ
-    @inbounds m,θ,x,y,fx,fy,κ = u(t)
-    Jv[1] = -δθ 
-    Jv[2] = -δy * cos(θ) - δx * -sin(θ) - δm * (fx*cos(θ) + fy*sin(θ)) 
-    Jv[5] = -δm  *  sin(θ)
-    Jv[6] = -δm  * -cos(θ) 
-    Jv[7] = -δθ 
-
-    return nothing 
-end
-
-function vjp2!(Jv,λ::AbstractArray{T,N},u::ODESolution,t) where{T,N} #vjp
-    @inbounds δm,δθ,δx,δy,δfx,δfy,δκ = λ
-    @inbounds m,θ,x,y,fx,fy,κ = u(t)
-    # Jv[1] = -δθ 
-    Jv[2] = - δy * -sin(θ) - δx * -cos(θ) - δm * (-fx*sin(θ) + fy*cos(θ)) 
-    Jv[5] = -δm  *  cos(θ)
-    Jv[6] = -δm  * sin(θ) 
-    # Jv[7] = -δθ 
-
+    J = zeros(T,7,7)
+    jac!(J,u(t),t,nothing) #jacobi
+    Jv .=   -J' * λ
     return nothing 
 end
 
@@ -246,6 +249,3 @@ prob = ODEProblem(func,zeros(Float32,7),(0f0,1f0))
 
 vjpfunc = ODEFunction(vjp!)
 vjpprob = ODEProblem(vjpfunc,ones(Float32,7),(1f0,0f0))
-
-vjp2func = ODEFunction(vjp!)
-vjp2prob = ODEProblem(vjpfunc,ones(Float32,7),(1f0,0f0))

@@ -44,7 +44,10 @@ end
 function initialize_beam(node::Clamp,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0 = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0     
-    m,fx,fy = parameters .* [normfactor_m(beam),normfactor_f(beam),normfactor_f(beam)] #am Balkenelement
+    m,fx,fy = parameters 
+    m *=  normfactor_m(beam)
+    fx *= normfactor_f(beam)
+    fy *= normfactor_f(beam) #am Balkenelement
     return [m,θ0 + θs,x/l,y/l,fx,fy,κ*l]
 end 
 
@@ -76,6 +79,7 @@ function initialize_beam(node::Movable,beam::Beam,parameters::AbstractVector{T})
 end
 
 function initialize_beam(beams::NamedTuple,nodes::NamedTuple,x,nodepos,i::Int)
+
     initialize_beam(nodes[nodepos[i]],beams[i],x[:,i])
 end 
 
@@ -165,7 +169,11 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
 end 
 
 addposition(node::BT,pos::AbstractVector{T}) where{T,BT<:Boundary{T}} =node + BT(pos...,zeros(T,3)...)
-addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb}} =BT(T.(node[1:6])...) + BT(pos...,zeros(T,3)...)
+
+function addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb}} 
+    Te = promote_type(T,Tb)
+    type(BT)(Te.(node[1:end])...) + (;x = pos[1],y = pos[2],ϕ = pos[3])
+end 
 addposition(node::Clamp,pos) = node
 addposition(node::LinearSlider,pos::AbstractVector{T}) where{T}  = LinearSlider{T}(node[1:3]...,pos[1]) 
 addposition(node::Joint,pos::AbstractVector{T}) where{T}  = Joint{T}(node[1:2]...,pos[1]) 
@@ -189,12 +197,14 @@ function toArray(x::AbstractVectorOfArray,pos = [0,1])
 end
 
 function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{false}) where{T}
+    # @show T
     nodepos = getstartnodes(str)
-
-    anz,nodes_ = changestartnodes(bn.Nodes,x)
+    x_ = reshape(x,3,:)
+    anz,nodes_ = changestartnodes(bn.Nodes,x_)
+    # @show typeof(nodes_[1])
     function prob_func(prob,i,repeat) 
         
-        u0 = initialize_beam(bn.Beams,nodes_,x[:,anz+1:end],nodepos,i)
+        u0 = initialize_beam(bn.Beams,nodes_,x_[:,anz+1:end],nodepos,i)
         remake(prob;u0 = u0,)
     end 
 

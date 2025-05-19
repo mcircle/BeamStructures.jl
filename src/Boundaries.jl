@@ -29,14 +29,11 @@ struct Branch{A<:Real} <:Boundary{A}
     function Branch(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T<:Real}
         new{T}(x,y,ϕ,fx,fy,mz)
     end 
-    function Branch{T}(x::D,y::D,ϕ::D,fx::D,fy::D,mz::D) where{D<:Real,T<:Real} 
-        t = promote_type(T,D)
-        new{t}(x,y,ϕ,fx,fy,mz)
-    end 
+    Branch{T}(x,y,ϕ,fx,fy,mz) where{T<:Real} = new{T}(x,y,ϕ,fx,fy,mz)
 end
 (cl::Branch{T})(displacement) where{T} = cl
 Branch(x,y,ϕ,fx,fy,mz) = Branch(promote(x,y,ϕ,fx,fy,mz)...)
-
+type(::Type{Branch{T}}) where{T} = Branch
 struct Free{A<:Real} <:Boundary{A}
     x::A
     y::A

@@ -43,12 +43,12 @@ function get_index_pars(nodes,inds)
     return ind:ind + indexlength(nodes[inds[end]]) - 1
 end
 
-function gaussfilter(x,μ = 0.,σ = 0.1)    
-   @. exp(-0.5 * ((x - μ) / σ)^2) #./ (σ * sqrt(2π))
+function gaussfilter(x,μ = 0,σ = 1f-1)    
+   @. exp(-((x - μ) / σ)^2 /2) #./ (σ * sqrt(2π))
 end
 
 function softmax(x,f = 1)
-    f .* exp.(x) ./ (sum(exp,x) + eps(Float32))
+    f .* exp.(x) ./ (sum(exp,x) .+ eps(Float32))
 end
 
 
@@ -60,8 +60,8 @@ switchCI(a::CartesianIndex{2}) = CartesianIndex((a[2],a[1]))
 findbeamsatnode(::Clamp,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x-> x[1] == node,nodes),Vector{Int}())
 findbeamsatnode(::Branch,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x->x[1] == node,nodes),findall(x-> x[2] == node,nodes))
 
-normfactor_m(b::Beam) = 12* b.l/(b.E*b.w*b.h^3) 
-normfactor_f(b::Beam) = b.l * normfactor_m(b) 
+normfactor_m(b::Beam) = 12* b.l/(b.E*b.w*b.h^3) #M̃ = M * normvector_m
+normfactor_f(b::Beam) = b.l * normfactor_m(b) #F̃ = F * normvector_f
 normvector(b::Beam) = [normfactor_m(b),normfactor_f(b),normfactor_f(b)]
 
 getside(x,beams) = ifelse(x ∈ beams[1],2,1)
@@ -81,7 +81,9 @@ function getindices(beams::NTuple{2,Vector{Int}},pos)
     idxs
 end 
 getpositionindices(beams) = getindices(beams,[2,3,4])
-getforceindices(beams) = getindices(beams,[1,5,6])
+function getforceindices(beams)
+    getindices(beams,[1,5,6])
+end 
 
 function getindices(s::Int)
     cis = Vector{CartesianIndex{2}}(undef,reduce(+,1:s-1))
