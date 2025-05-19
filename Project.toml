@@ -1,7 +1,7 @@
 name = "BeamStructures"
 uuid = "44f7160b-5d2f-475a-9a6c-c0abac920fd9"
 authors = ["MCircle <marten.zirkel@tu-ilmenau.com>"]
-version = "0.1.52"
+version = "0.1.53"
 
 [deps]
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
