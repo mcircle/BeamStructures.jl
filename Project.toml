@@ -1,10 +1,11 @@
 name = "BeamStructures"
 uuid = "44f7160b-5d2f-475a-9a6c-c0abac920fd9"
 authors = ["MCircle <marten.zirkel@tu-ilmenau.com>"]
-version = "0.1.53"
+version = "0.1.54"
 
 [deps]
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"

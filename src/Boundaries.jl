@@ -162,6 +162,15 @@ Base.:/(b::T,a::Real)where{T<:Boundary} = T(b ./ a...)
 function Base.:+(a::T,b::NamedTuple) where{T<:Boundary} 
     T(map(x->hasproperty(b,x) ? getfield(a,x) + getfield(b,x) : getfield(a,x),fieldnames(T))...)
 end
+# function CRC.rrule(::typeof(Base.:+), a::T, b::NamedTuple) where{T<:Boundary}
+#     ab = T(map(x->hasproperty(b,x) ? getfield(a,x) + getfield(b,x) : getfield(a,x),fieldnames(T))...), 
+#     function back_add_nt(dy)
+#         da = Tangent{T}(map(x->hasproperty(b,x) ? x -> getfield(dy,x) : nothing,fieldnames(T))...)
+#         db = Tangent{typeof(b)}(map(x->hasproperty(b,x) ? x -> getfield(dy,x) : nothing,fieldnames(T))...)
+#         return CRC.NoTangent(),da,db
+#     end
+#     return ab,back_add_nt
+# end
 
 Optimisers.functor(x::T) where{T<:Boundary} = (NamedTuple{fieldnames(T)}(x[1:end]),T)
 Optimisers.init(o::Adam, x::B) where{B<:Boundary{T}} where{T}  = (B(zeros(T,6)...), B(zeros(T,6)...), T.(o.beta))

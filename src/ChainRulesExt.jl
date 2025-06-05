@@ -19,6 +19,13 @@ function CRC.rrule(::Type{Beam},l,h,w,κ0,E,θs,θe)
     return Beam(l,h,w,κ0,E,θs,θe),back_beam
 end 
 
+function CRC.rrule(::Type{B},x,y,ϕ,fx,fy,mz) where{T<:Real,B<:Boundary{T}}
+    function back_boundary(ȳ)
+        return NoTangent(),ȳ.x,ȳ.y,ȳ.ϕ,ȳ.fx,ȳ.fy,ȳ.mz
+    end 
+    return B(x,y,ϕ,fx,fy,mz),back_boundary
+end
+
 function scalepos_back(ȳ,y,beam::Beam{T}) where{T}
     
     dy = ȳ .* [1,beam.l,beam.l]
@@ -64,7 +71,7 @@ function CRC.rrule(::typeof(reduceposat),node::Bo,beams,y,beamnbrs) where{T,Bo<:
         ∂y = zero(y)
         for (n,b) in enumerate(beamnbrs[1])
             # _, spback = CRC.rrule(scalepos,beams[b],y[2:4,2,b],Val(2))
-            _,dbeam,dy,_ = scalepos_back(rȳ[:,n],y[:,n],beams[b])    
+            _,dbeam,dy,_ = scalepos_back(rȳ[:,n],y[:,2,n],beams[b])    
             ∂beams -= Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
             ∂y[2:4,2,b] .-= dy
         end
@@ -369,7 +376,7 @@ function CRC.rrule(::typeof(residuals!),residuals,str::Structure,y,bn)
         end  
     end
     function residuals!_back(ȳ)
-        ∂res = InplaceableThunk(dself -> dself .+= ȳ,@thunk(copy(ȳ)))
+        ∂res = ZeroTangent()
         ∂y = zero(y)
         ∂beams = Tangent{typeof(bn.Beams)}(;ntuple(x->keys(bn.Beams)[x] =>ZeroTangent(),length(bn.Beams))...)        
         ∂nodes = Tangent{typeof(bn.Nodes)}(;ntuple(x->keys(bn.Nodes)[x] =>ZeroTangent(),length(bn.Nodes))...)
@@ -591,7 +598,7 @@ function CRC.rrule(str::Structure,x::AbstractArray{T,N},bn::NamedTuple) where{T,
         ∂bn = Tangent{typeof(bn)}(;Beams = dBeams,Nodes = dNodes)
         return NoTangent(),∂x,∂bn,ZeroTangent(),NoTangent()
     end
-    (toArray(sol),(;Beams = bn.Beams,Nodes = nodes_)),back_ode
+    (toArray(solforward),(;Beams = bn.Beams,Nodes = nodes_)),back_ode
 end 
 
 
