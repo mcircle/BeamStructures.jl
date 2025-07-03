@@ -21,15 +21,24 @@ end
 
 function CRC.rrule(::Type{B},x,y,ϕ,fx,fy,mz) where{T<:Real,B<:Boundary{T}}
     function back_boundary(ȳ)
+        # @show "now in rrule back_boundary for $(B)"
         return NoTangent(),ȳ.x,ȳ.y,ȳ.ϕ,ȳ.fx,ȳ.fy,ȳ.mz
     end 
     return B(x,y,ϕ,fx,fy,mz),back_boundary
 end
 
+function CRC.rrule(::typeof(+),b::B,nt::NamedTuple) where{T<:Real,B<:Boundary{T}}
+    function back_add(ȳ)
+        # @show "now in rrule add to boundary for $(B)"
+        fields_of_nt = fieldnames(B)
+        return NoTangent(),CRC.StructuralTangent{B}(CRC.backing(ȳ)),ȳ
+    end 
+    return b + nt,back_add
+end
+
 function scalepos_back(ȳ,y,beam::Beam{T}) where{T}
-    
     dy = ȳ .* [1,beam.l,beam.l]
-    dbeam = Tangent{Beam{T}}(;l = sum(y[2:3] .* ȳ[2:3]) ,θe = -ȳ[1])
+    dbeam = Tangent{Beam{T}}(;l = sum(y[2:3] .* ȳ[2:3] ) ,θe = -ȳ[1])
     return NoTangent(),dbeam, dy,NoTangent() 
 end 
 
@@ -69,13 +78,14 @@ function CRC.rrule(::typeof(reduceposat),node::Bo,beams,y,beamnbrs) where{T,Bo<:
         
         ∂beams= Tangent{typeof(beams)}(;ntuple(x->keys(beams)[x]=>ZeroTangent(),length(beams))...)
         ∂y = zero(y)
+        dnode = Tangent{Bo}(;x = 0,y = 0,ϕ = 0)
         for (n,b) in enumerate(beamnbrs[1])
             # _, spback = CRC.rrule(scalepos,beams[b],y[2:4,2,b],Val(2))
-            _,dbeam,dy,_ = scalepos_back(rȳ[:,n],y[:,2,n],beams[b])    
+            _,dbeam,dy,_ = scalepos_back(rȳ[:,n],y[:,2,n],beams[b])     
             ∂beams -= Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
             ∂y[2:4,2,b] .-= dy
+            dnode += Tangent{Bo}(;x = beams[b].l * rȳ[2,n],y = beams[b].l *  rȳ[3,n],ϕ = rȳ[1,n])
         end
-        dnode = Tangent{Bo}(;x = sum(rȳ[2,:]),y = sum(rȳ[3,:]),ϕ = sum(rȳ[1,:]))
         return NoTangent(),dnode,∂beams,∂y,NoTangent()
     end 
     return sol, reduceposat_back
@@ -89,7 +99,7 @@ function CRC.rrule(::typeof(reduceposat),node::Bo,beams,y::AbstractArray{T},facs
         ∂beams= Tangent{typeof(beams)}(;ntuple(x->keys(beams)[x]=>ZeroTangent(),length(beams))...)
         ∂y = zero(y)
         ∂f = zero(facs)
-        # dnode = Tangent{Bo}()
+        dnode = Tangent{Bo}()
         
         for (n,b) in enumerate(beamnbrs[1])
             
@@ -101,20 +111,21 @@ function CRC.rrule(::typeof(reduceposat),node::Bo,beams,y::AbstractArray{T},facs
 
             ∂f[b] = ([node.ϕ,node.x,node.y] .- sp) ⋅ rȳ[:,n] 
             # normalerweise  mit facs[b] multipliziert
-            # dnode += Tangent{Bo}(;x = rȳ[2,n], y = rȳ[3,n] ,ϕ =  rȳ[1,n]) 
+            dnode += Tangent{Bo}(;x = facs[b] * rȳ[2,n], y = facs[b] * rȳ[3,n] ,ϕ =  facs[b] * rȳ[1,n]) 
         end
-        dnode = Tangent{Bo}(;x = sum(rȳ[2,:]),y = sum(rȳ[3,:]),ϕ = sum(rȳ[1,:]))
+        # dnode = Tangent{Bo}(;x = sum(rȳ[2,:]),y = sum(rȳ[3,:]),ϕ = sum(rȳ[1,:]))
         return NoTangent(),dnode,∂beams,∂y,∂f, NoTangent()
     end 
     return sol, reduceposat_back
 end 
 
 function pullback_normfactor_m(ȳ,b::Beam{T}) where{T}
-    nom = 12/(b.E * b.w * b.h^3)
+    
+    nom = 12/(b.E * (b.w) * (b.h)^3)
     ∂b = Tangent{Beam{T}}(;
-        l = ȳ  * nom,
-        h = -3 * b.l * ȳ * nom / b.h,
-        w = - b.l * ȳ * nom / b.w ,
+        l = ȳ  * nom ,
+        h = (-3 * b.l * ȳ * nom / b.h) ,
+        w = -b.l * ȳ * nom / b.w  ,
         E = - b.l * ȳ * nom / b.E
     )
     return (NoTangent(), ∂b)
@@ -127,7 +138,7 @@ function CRC.rrule(::typeof(normfactor_m), b::Beam{T}) where{T}
 end
 
 function pullback_normfactor_f(ȳ,b::Beam{T}) where{T}
-    ∂m = b.l * ȳ
+    ∂m = b.l * ȳ #/ (1+exp(-b.l))
     fm, pb_m = CRC.rrule(normfactor_m, b)
     _, ∂b_m = pb_m(∂m)
     
@@ -181,15 +192,19 @@ function pullback_init_beam(ȳ,node::No,beam::Beam{BT},pars) where{BT,No<:Bound
     @inbounds mb,θb,xb,yb,fxb,fyb,κb = ȳ
     @inbounds m,fx,fy = pars 
     l,κ = beam.l,beam.κ0
+    # If force > as critical force, then beam should buckle 
+    if isapprox(beam.κ0,0) && π^2/(4l) <= hypot(fx,fy) && isapprox(atan(fy,fx), - beam.θe ,atol = 0.01)
+       mb +=  sign(mb) * hypot(fxb,fyb)
+    end 
     x,y = node.x,node.y
     _,∂beam = pullback_normfactor([m*mb, fx*fxb,fy*fyb] ,beam)
-    
-    ∂l = -x/l^2 * xb 
-    ∂l -= y/l^2 * yb 
-    ∂l +=  κ * κb
-    
-    ∂beam += Tangent{Beam{BT}}(l = ∂l,κ0 = l*κb,θs = θb)
-    ∂node = Tangent{No}(;x = xb/l,y=yb/l,ϕ = θb)
+
+    ∂beam += Tangent{Beam{BT}}(κ0 = l*κb,θs = θb)
+
+    dx = xb/l
+    dy = yb/l
+
+    ∂node = Tangent{No}(;x = dx,y=dy,ϕ = θb)
     ∂pars =  [mb,fxb,fyb] .* normvector(beam)
     return NoTangent(),∂node,∂beam,∂pars
 end 
@@ -222,7 +237,7 @@ function CRC.rrule(::typeof(initialize_beam),node::No,beam::Beam{BT},pars::Abstr
     x,y,θ0, = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0
     m,fx,fy = pars .* normvector(beam) #am Balkenelement
-    result = [m,θ0 + θs,x ./l,y ./l,fx,fy,κ*l]
+    result = [m,θ0 + θs,x./l,y./l,fx,fy,κ*l]
     init_beam_back(ȳ) = pullback_init_beam(ȳ,node,beam,pars)
     return result, init_beam_back
 end 
@@ -257,7 +272,7 @@ function CRC.rrule(::typeof(reduceforceat),node::No,beams,y,idxs) where{No}
     
     sol = reduceforceat(node,beams,y,idxs)
     function force_bound_back(ȳ)
-
+        
         y_idxs = getforceindices(idxs)
         ∂y = zero(y)
         y_ = @view y[y_idxs]
@@ -270,11 +285,12 @@ function CRC.rrule(::typeof(reduceforceat),node::No,beams,y,idxs) where{No}
             else
                 _,dbeam,dyrr_ = rr_norm(ȳ)
             end 
+            
             ∂beams += Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
-            dyb .= dyrr_ 
+            dyb .+= dyrr_ 
         end 
 
-        ∂node = CRC.zero_tangent(No) #Tangent{No}(;fx = ȳ[2],fy = ȳ[3],mz = ȳ[1])
+        ∂node = CRC.zero_tangent(No) # Tangent{No}(;fx = ȳ[2],fy = ȳ[3],mz = ȳ[1]) #CRC.zero_tangent(No) #
         return NoTangent(),∂node,∂beams,∂y,NoTangent()
     end 
     return sol,force_bound_back
@@ -346,6 +362,15 @@ end
 
 @non_differentiable reduceforceat(n::Clamp,beams,y,idxs) 
 
+# function spreadgradsnodes(node1,node2,dnode)
+#     r = hypot(node1.x - node2.x,node1.y-node2.y)
+#     dr_dx = 2(node1.x - node2.x)/r
+#     dr_dy = 2(node1.y - node2.y)/r
+#     angle = atan(node2.y - node1.y,node2.x - node1.x)
+#     #-r * sin(angle) *dnode.ϕ ,r * cos(angle) * dnode.ϕ 
+#     d_onode = Tangent{typeof(node2)}(;x = ( dr_dx * dnode.x),y = (+ dr_dy*dnode.y),ϕ = -dnode.ϕ)
+# end 
+
 function CRC.rrule(::typeof(residuals!),residuals,str::Structure,y,bn)
     ind = 1
     adj = str.AdjMat
@@ -377,24 +402,25 @@ function CRC.rrule(::typeof(residuals!),residuals,str::Structure,y,bn)
     end
     function residuals!_back(ȳ)
         ∂res = ZeroTangent()
-        ∂y = zero(y)
+        ∂y = zero(y) 
+        # ȳ_ = (ȳ)./(sqrt(var(ȳ)) + eps(eltype(ȳ)))
         ∂beams = Tangent{typeof(bn.Beams)}(;ntuple(x->keys(bn.Beams)[x] =>ZeroTangent(),length(bn.Beams))...)        
         ∂nodes = Tangent{typeof(bn.Nodes)}(;ntuple(x->keys(bn.Nodes)[x] =>ZeroTangent(),length(bn.Nodes))...)
-
         for (ind,pos) in resforcedict
             _,dnode,dbeams,dy,_ =rrforcedict[ind](ȳ[idcs[:,pos]])
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams += dbeams
-            ∂y .+= dy ./ length(idcs[:,pos])
+            ∂y .+= dy 
         end
-        
+
         for (ind,pos) in resposdict
             _,dnode,dbeams,dy,_ = rrposdict[ind](ȳ[idcs[:,pos]])
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
-            ∂beams +=  dbeams
+            ∂beams += dbeams
             ∂y .+= dy
         end 
         ∂bn = Tangent{typeof(bn)}(;Beams = ∂beams,Nodes = ∂nodes)
+        ∂y
         return NoTangent(),∂res,NoTangent(),∂y,∂bn
     end 
 
@@ -444,7 +470,7 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams += dbeams
             ∂y .+= dy 
-            ∂fac[idcs] .+= df
+            # ∂fac[idcs] .+= df
         end
         
         for (ind,pos) in resposdict
@@ -452,8 +478,9 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams +=  dbeams
             ∂y .+= dy
-            ∂fac[idcs] .+= df
+            # ∂fac[idcs] .+= df
         end 
+        # @show ∂fac
         ∂bn = Tangent{typeof(bn)}(;Beams = ∂beams,Nodes = ∂nodes)
         return NoTangent(),∂res,∂fac,∂y,∂bn
     end    
@@ -538,11 +565,12 @@ end
 
 function reduction_func!(u,data,I)
     
-    ∂pars,∂Beams,∂Nodes = u
+    # ∂pars,∂Beams,∂Nodes = u
     for ((∂beam,∂node,∂pars),i) in zip(data,I)
+        
+        u[1][:,i] .+= ∂pars
         u[3] += ∂node
         u[2] += ∂beam
-        u[1][:,i] .+= ∂pars
     end 
     u,false
 end 
@@ -579,7 +607,7 @@ function CRC.rrule(str::Structure,x::AbstractArray{T,N},bn::NamedTuple) where{T,
         @inbounds ∂sol,∂bn = ȳ
 
         function prob_func(prob,i,repeat) 
-            u0 = collect(∂sol[:,2,i])
+            u0 = collect(∂sol[:,2,i])# - ∂sol[:,1,i])
             remake(prob;u0 = u0,p = solforward[i],tspan = (one(T),zero(T)))
         end
         ensprob  =  EnsembleProblem(vjpprob;prob_func = prob_func,
@@ -595,12 +623,46 @@ function CRC.rrule(str::Structure,x::AbstractArray{T,N},bn::NamedTuple) where{T,
 
         _,∂nodes_change, ∂xchange = change_pullback((nothing,dNodes))
         ∂x .+= ∂xchange
-        ∂bn = Tangent{typeof(bn)}(;Beams = dBeams,Nodes = dNodes)
+        ∂x[:,anz+1:end] .+= ∂sol[[1,5,6],1,:]
+        # dBeams_out = CRC.zero_tangent(dBeams)
+        # dbeams_mean = mean(dBeams)
+        # dbeams_var = sqrt(var(dBeams)) / 10
+        # for i in eachindex(dBeams)
+        #     dbeamnorm = (dBeams[i] - dbeams_mean) / dbeams_var
+        #     dBeams_out += Tangent{typeof(bn.Beams)}(;i => (dBeams[i] - dbeams_mean) / dbeams_var)
+        # end 
+        ∂bn = Tangent{typeof(bn)}(;Beams = dBeams,Nodes = ∂nodes_change)
         return NoTangent(),∂x,∂bn,ZeroTangent(),NoTangent()
     end
     (toArray(solforward),(;Beams = bn.Beams,Nodes = nodes_)),back_ode
 end 
 
+function Base.inv(x::Tangent{T,NT}) where{T<:Beam,NT}
+    fields = fieldnames(T)
+    CRC.StructuralTangent{T}((;map((f) -> f => Float32(inv(getproperty(x,f))), fields)...))
+end
+function Base.sqrt(x::Tangent{T,NT}) where{T<:Beam,NT}
+    fields = fieldnames(T)
+    CRC.StructuralTangent{T}((;map((f) -> f => Float32(sqrt(getproperty(x,f))), fields)...))
+end
+function Base.:*(x::Tangent{T},y::Tangent{T}) where{T}
+    fields = fieldnames(T)
+    CRC.StructuralTangent{T}((;map((f) -> f => Float32(getproperty(x,f) * getproperty(y,f)), fields)...))
+end
+function Statistics.realXcY(x::Tangent{T,NT},y::Tangent{T,NT}) where{T<:Beam,NT}
+    x * y 
+end
+# function norm_beam_gradient(gbeams{T},fields = fieldnames(Beam)) where{T}
+#     exprs = Vector{Pair}(undef,7)
+#     for (i,field) in enumerate(fieldnames(Beam))
+#         if field in fields
+#             exprs[i] = field => 
+#         else
+#             exprs[findfirst(x->x==field,fields)] = Expr(:call, :zero, T)
+#         end
+#     end
+#     [:(getproperty())]
+# end 
 
 function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},bn::NamedTuple,adj,saveat::Union{AbstractFloat,AbstractVector} = []) where{T}
     
@@ -676,7 +738,7 @@ function CRC.rrule(::typeof(admittance_matrix),solfw::EnsembleSolution{T,N,S},ad
         u0[[2],1] .= one(T) #du/dx
         u0[[3],2] .= one(T) #du/dy
         u0[[4],3] .= one(T) #du/dθ
-        remake(prob;u0 = u0,p = solfw[i])#,tspan = (one(T),zero(T)))
+        remake(prob;u0 = u0,p = solfw[i],tspan = (one(T),zero(T)))
     end
     #dadj Gradient der Steifigkeitsmatrix berechnen  
     ensprob2  =  EnsembleProblem(vjpprob;prob_func = prob_func,
@@ -714,8 +776,11 @@ function CRC.rrule(::typeof(admittance_matrix),solfw::EnsembleSolution{T,N,S},ad
             Δd .+= view(ȳ,i_,i_) + view(ȳ,j_,j_)
 
             # Pullback der elementweisen Multiplikation mit d0
-            ∂adj[id] +=  sum(d0 .* Δd )#./ normfactor_m(beam))
+            ∂adj[id] += sum(d0 .* Δd )#./ normfactor_m(beam))
         end
+        idxs = getindices(size(adj,1)) 
+        # ∂adj = -(∂adj.- mean(abs,∂adj[idxs])./ sqrt(var(∂adj[idxs]) + eps(eltype(∂adj)))) #/ 10
+        # ∂adj.*= 1
         return NoTangent(),ZeroTangent(),∂adj,ZeroTangent(),ZeroTangent()
     end 
     ad,admittance_back
@@ -744,7 +809,7 @@ function CRC.rrule(::typeof(effective_stiffness),k::AbstractMatrix{T},u) where{T
         Δ_ke_direct =  mov * mov'
 
         Δ_ke_inverse = -(ket \ (Δ_u * Δ_ke_direct))
-        Δ_k[ids, ids] .+= Δ_dot * (Δ_ke_direct + Δ_ke_inverse)
+        Δ_k[ids, ids] .-= Δ_dot * (Δ_ke_direct + Δ_ke_inverse)
         
         return CRC.NoTangent(),Δ_k, NoTangent()
     end

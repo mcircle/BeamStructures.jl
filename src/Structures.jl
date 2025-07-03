@@ -168,7 +168,7 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
     residuals 
 end 
 
-addposition(node::BT,pos::AbstractVector{T}) where{T,BT<:Boundary{T}} =node + BT(pos...,zeros(T,3)...)
+addposition(node::BT,pos::AbstractVector{T}) where{T,BT<:Boundary{T}} =node + (;x = pos[1],y = pos[2],ϕ = pos[3])
 
 function addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb}} 
     Te = promote_type(T,Tb)

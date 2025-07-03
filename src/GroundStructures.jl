@@ -129,17 +129,27 @@ function reduction_func_admittance_!((u,data_out),data,I,solfw,adj,beams)
 end 
 
 function effective_stiffness(k::AbstractMatrix{T},u::Pair{AV,AB}) where{T,AV,AB}
-    # linidcs = reshape(axes(k,1),3,:)
     nomoveidcs = [u[1]...]
     moveables = [u[2]...]
     ids = setdiff(axes(k,1),nomoveidcs)
-    # ids = setdiff(ids,moveables)
     ke = @view k[ids,ids]
     f = zeros(T,size(k,1))
     u = zero(f)
     f[moveables] .= [1]
     u[ids] .= ke\f[ids]
     u' * k * u
+end
+
+function effective_movement(k::AbstractMatrix{T},u::Pair{AV,AB}) where{T,AV,AB}
+    nomoveidcs = [u[1]...]
+    moveables = [u[2]...]
+    ids = setdiff(axes(k,1),nomoveidcs)    
+    ke = @view k[ids,ids]
+    f = zeros(T,size(k,1))
+    u = zero(f)
+    u[moveables] .= [1]
+    f[ids] .= ke * u[ids]
+    f
 end
 
 function check_structure(bn,adj)
@@ -165,7 +175,13 @@ end
 (str::GroundStructure)(x::AbstractMatrix,bn,adj,plt::Bool = false,saveat::Union{Real,AbstractVector} = []) = str(x,bn,adj,saveat,Val(plt))
 (str::GroundStructure)(x::AbstractVector,bn,adj,plt::Bool = false,saveat =[]) = str(reshape(x,3,:),bn,adj,saveat,Val(plt))
 
-function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{T},beamnbrs) where{T}
+function (str::GroundStructure)(residuals::T,values::T,bn::NamedTuple,adj) where{T} #new loss
+    sols,bn_ = str(values,bn,adj)
+    # sols_ = toArray(sols)
+    residuals!(residuals,adj,sols,bn_)
+end 
+
+function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{TF},beamnbrs) where{T,TF}
     # @show beamnbrs
     res = map((ind)-> factors[ind] .* ([node.ϕ,node.x,node.y] .- scalepos(beams[ind],y[2:4,2,ind],Val(2))),beamnbrs[1])
     if isempty(res)
@@ -174,16 +190,16 @@ function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},fact
     reduce(hcat,res)
 end
 #at Clamp, force is equal to surounding
-reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},facs::AbstractVector{T},beamsidxs) where {T} = Vector{T}()
+reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},facs::AbstractVector{TF},beamsidxs) where {T,TF} = Vector{T}()
 
-function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{T},beamsidxs) where{T}
+function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{TF},beamsidxs) where{T,TF}
     # @show beamsidxs
     solp = reduce((init,beampos)->init .+ factors[beampos] * scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = zeros(T,3))
     solm = reduce((init,beampos)->init .+ factors[beampos] * scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = zeros(T,3)) 
     return solp .- solm #.+ node[[6,4,5]]
 end 
 
-function residuals!(residuals::Matrix,adj::AbstractMatrix{T},y::AbstractArray{T,3},bn) where{T}
+function residuals!(residuals::Matrix,adj::AbstractMatrix{TA},y::AbstractArray{T,N},bn) where{T,TA,N}
     
     ids = getindices(size(adj,1))
     adj_ = ifelse.(adj .> 1,1,adj)

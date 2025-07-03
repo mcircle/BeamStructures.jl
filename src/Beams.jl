@@ -1,3 +1,4 @@
+
 struct Beam{T<:Real} 
     l::Union{T,Nothing}
     h::Union{T,Nothing}
@@ -6,34 +7,52 @@ struct Beam{T<:Real}
     E::Union{T,Nothing}
     θs::Union{T,Nothing}
     θe::Union{T,Nothing}
-    function Beam(l::T,h::T,w::T,κ0::T,E::T,θs::T,θe::T) where{T}
-        new{T}(l,h,w,κ0,E,θs,θe)
-    end
-    Beam{T}(l,h,w,κ0,E,θs,θe) where{T} = new{T}(l,h,w,κ0,E,θs,θe)
+    # function Beam{T}(l,h,w,κ0,E,θs,θe) where{T}
+    #     new{T}(l,h,w,κ0,E,θs,θe)
+    # end 
 end 
 
+struct Beams{B<:Beam} 
+    beams::Vector{B}
+    function Beams(beams::Vector{Beam{T}}) where{T}
+        new{B}(beams)
+    end 
+end
+
+relu(x::T,m = zero(T)) where{T} = ifelse(x < m,m,x)
+
 function Beam(l,h,w,κ0;E = 2.1f5,θs = 0,θe = θs + l*κ0)
+    # l_ = relu(l)
+    # h_ = relu(h,1f-2)
+    # w_ = relu(w,1-2)
     p = promote(l,h,w,κ0,E,θs,θe)
     Beam(p...)
 end 
+
 function Beam{T}(l,h,w,κ0;E = 2.1f5,θs = 0f0,θe = θs + l*κ0) where{T}
-    Beam{T}(l,h,w,κ0,E,θs,θe)
+    # l_ = relu(l)
+    # h_ = relu(h,1f-2)
+    # w_ = relu(w,1f-2)
+    Beam(T.([l,h,w,κ0,E,θs,θe])...)
 end 
 
-function Beam{T}(l::D,h::D,w::D,κ0::D,E::D,θs::D,θe::D) where{T,D}
-    Beam(l,h,w,κ0,E,θs,θe)
-end
+# function Beam{T}(l::D,h::D,w::D,κ0::D,E::D,θs::D,θe::D) where{T,D}
+#     l_ = inverse_softplus(l)
+#     h_ = inverse_softplus(h)
+#     w_ = inverse_softplus(w)
+#     Beam(l,h,w,κ0,E,θs,θe)
+# end
 
 function Beam{T}(nt::NamedTuple) where{T}
-    Beam{T}((map(k->getfield(nt,k),fieldnames(Beam))...))
+    Beam((map(k->getfield(nt,k),fieldnames(Beam))...))
 end 
     
 function (b::Beam{T})(nt::AbstractVector) where{T}
-    Beam{T}(nt...)
+    Beam(nt...)
 end 
 
 function Base.show(io::IO,beam::Beam)
-    return println(io, "Beam with Length: $(beam.l),width: $(beam.w), height: $(beam.h), curvature: $(beam.κ0) and E: $(beam.E)")
+    return println(io, "Beam with Length: $(beam[1]),width: $(beam[3]), height: $(beam[2]), curvature: $(beam[4]) and E: $(beam[5])")
 end 
 
 function change_beam(beam::Beam;kwargs...)
@@ -45,15 +64,30 @@ end
 
 Base.length(b::Beam) = 7
 Base.lastindex(b::Beam) = 7
-Base.getindex(b::Beam,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Beam)[idx])
-Base.getindex(b::Beam,idx::Int) = getfield(b,fieldnames(Beam)[idx])
+function Base.getproperty(b::Beam,n::Symbol)
+    val = getfield(b,n)
+    # if n ∈ [:l,:h,:w] 
+    #     return softplus(val)
+    # end 
+    # return val 
+end 
+
+Base.getindex(b::Beam,idx::Int) = getproperty(b,fieldnames(Beam)[idx])
+Base.getindex(b::Beam,idx::AbstractVector) = map(x->getindex(b,x),idx)
 Base.iterate(b::Beam,i::Int = 1) = i > 7 ? nothing : (getfield(b,i),i+1)
 Base.IteratorSize(b::Beam) = Base.HasLength()
-
+Base.real(b::Beam) = b
+Statistics.realXcY(a::Beam,b::Beam) = a*b
 Base.:*(a::Real,b::Beam) = Beam(a .* b...)
 Base.:*(b::Beam,a::Real) = Beam(a .* b...)
 Base.:*(a::Beam,b::Beam) = Beam(a .* b...)
-Base.:-(a::Beam,b::Beam) = Beam(a .- b...)
+@generated function Base.:-(a::Beam,b::Beam) 
+    fields = fieldnames(a)
+    exprs = [:($(QuoteNode(f)) ∈ [:l,:h,:w] ? relu(getfield(a, $(QuoteNode(f))) - getfield(b,$(QuoteNode(f))),1f-2) : (getfield(a, $(QuoteNode(f))) - getfield(b,$(QuoteNode(f))))) for f in fields]
+    return quote
+        $(Expr(:call,Beam, exprs...))
+    end
+end 
 Base.:-(a::Beam,b::Real) = Beam(a .- b...)
 Base.:-(a::Real,b::Beam) = Beam(a .- b...)
 
@@ -78,7 +112,7 @@ Base.zero(::Beam{T}) where{T} = Beam(zeros(T,7)...)
 @generated function combine(β,mt::Beam{T},dx) where{T}
     fields = fieldnames(mt)
     # exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
-    exprs = [:(isnothing(getproperty(dx, $(QuoteNode(f)))) ? zero(T) : β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
+    exprs = [:(isnothing(getfield(dx, $(QuoteNode(f)))) ? zero(T) : β * getfield(mt, $(QuoteNode(f))) + (1-β) * getfield(dx, $(QuoteNode(f)))) for f in fields]
     return quote
         $(Expr(:call,Beam, exprs...))
     end
@@ -86,7 +120,7 @@ end
 
 @generated function combineabs2(β,mt::Beam{T},dx) where{T}
     fields = fieldnames(mt)
-    exprs = [:(isnothing(getproperty(dx, $(QuoteNode(f)))) ? zero(T) : β * getproperty(mt, $(QuoteNode(f))) + (1-β) * abs2(getproperty(dx, $(QuoteNode(f))))) for f in fields]
+    exprs = [:(isnothing(getfield(dx, $(QuoteNode(f)))) ? zero(T) : β * getfield(mt, $(QuoteNode(f))) + (1-β) * abs2(getfield(dx, $(QuoteNode(f))))) for f in fields]
     return quote
         $(Expr(:call,Beam, exprs...))
     end
@@ -94,7 +128,7 @@ end
 
 @generated function combine(η,βt,mt::B,vt::B,ϵ) where{B<:Beam}
     fields = fieldnames(mt)
-    exprs = [:(getproperty(mt, $(QuoteNode(f))) / (1-βt[1]) / (sqrt(getproperty(vt, $(QuoteNode(f))) / (1 -βt[2]))+ ϵ)* η) for f in fields]
+    exprs = [:(getfield(mt, $(QuoteNode(f))) / (1-βt[1]) / (sqrt(getfield(vt, $(QuoteNode(f))) / (1 -βt[2]))+ ϵ)* η) for f in fields]
     return quote
         $(Expr(:call,B, exprs...))
     end

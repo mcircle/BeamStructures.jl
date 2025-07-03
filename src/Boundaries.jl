@@ -2,6 +2,12 @@
 # abstract type AbstractBoundary{T} end
 abstract type Boundary{T} end #extern
 # abstract type Movable{A<:Real} <:AbstractBoundary{A} end 
+# struct Boundaries{A<:Boundary{T} where{T<:Real}}
+#     nodes::Vector{A}
+#     function Boundaries(nodes::Vector{A}) where{A<:Boundary{T},T<:Real}
+#         new{A}(nodes)
+#     end 
+# end
 
 struct Clamp{A<:Real} <:Boundary{A}
     x::A
@@ -214,7 +220,7 @@ function Optimisers.apply!(o::Adam,state,b::BT,dx) where{BT<:Boundary{T}} where{
     
     mt =combine(β[1],mt,dx) # β[1] * mt + (1 - β[1]) * dx
     vt = combineabs2(β[2],vt,dx) # β[2] * vt + (1 - β[2]) * abs2(dx)
-    dx′ = combine(η,βt,mt,vt,ϵ) # mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
+    dx′ = combine( η,βt,mt,vt,ϵ) # mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
   
     return (mt, vt, βt .* β), dx′
 end 

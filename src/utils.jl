@@ -47,13 +47,13 @@ function gaussfilter(x,μ = 0,σ = 1f-1)
    @. exp(-((x - μ) / σ)^2 /2) #./ (σ * sqrt(2π))
 end
 
-function softmax(x)
-    exp.(x) ./ (sum(exp,x) .+ eps(eltype(x)))
-end
+# function softmax(x)
+#     exp.(x) ./ (sum(exp,x) .+ eps(eltype(x)))
+# end
 function softmax(x;dims = 1)
     tmp = zero(x)
     for (tm,xt) in zip(eachslice(tmp;dims = dims),eachslice(x,;dims = dims))
-        tmp .= softmax(xt)
+        tm .= exp.(xt) ./ (sum(exp,xt) .+ eps(eltype(x)))
     end
     tmp
 end
@@ -118,10 +118,19 @@ function getfieldof(beams,s::Symbol)
     vec
 end  
 
-function DiffEqBase.promote_u0(u0::Vector{T},p::ODESolution{T,N},t::T) where {T,N}
+function DiffEqBase.promote_u0(u0::AbstractArray{T,N},p::ODESolution{T,N1},t::T) where {T,N,N1}
     u0
 end 
 
 function DiffEqBase.anyeltypedual(sol::ODESolution,::Val{counter}) where counter
     diffeqmapreduce(anyeltypedual, promote_dual, (sol.u, sol.t))
 end
+
+function softplus(x,β = 1f0)
+    @. log(1 + exp(β * x)) / β
+end
+
+function inverse_softplus(x,β = 1f0)
+    @. log(exp(β * x) - 1) / β
+end
+
