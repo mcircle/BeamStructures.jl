@@ -204,24 +204,28 @@ function residuals!(residuals::Matrix,adj::AbstractMatrix{TA},y::AbstractArray{T
     ids = getindices(size(adj,1))
     adj_ = ifelse.(adj .> 1,1,adj)
     adj_ = ifelse.(adj_ .< 0,0,adj)
+    branches = count(x->isa(x,Branch),bn.Nodes)
+    residuals_forces = @view residuals[:,1:branches]
+    residuals_positions = @view residuals[:,branches+1:end]
     # idcs = LinearIndices(residuals)
-    nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
-    start = 1
+    # nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
+    forces = 1
+    positions = 1
     for n in axes(adj,1)
         node = bn.Nodes[n]
         beams = findbeamsatnode(node,n,ids)
         res = reduceforceat(node,bn.Beams,y,adj[ids],beams)
        
         if !isempty(res)
-            residuals[:,start] .= res
-            start += 1
+            residuals_forces[:,forces] .= res
+            forces += 1
         end 
         res = reduceposat(node,bn.Beams,y,adj[ids],beams)
         
         if !isempty(res)
-            idxs = start:start + size(res,2) - 1
-            residuals[:,idxs] .= res
-            start = idxs[end] + 1
+            idxs = positions:positions + size(res,2) - 1
+            residuals_positions[:,idxs] .= res
+            positions = idxs[end] + 1
         end  
     end
     residuals 

@@ -652,17 +652,6 @@ end
 function Statistics.realXcY(x::Tangent{T,NT},y::Tangent{T,NT}) where{T<:Beam,NT}
     x * y 
 end
-# function norm_beam_gradient(gbeams{T},fields = fieldnames(Beam)) where{T}
-#     exprs = Vector{Pair}(undef,7)
-#     for (i,field) in enumerate(fieldnames(Beam))
-#         if field in fields
-#             exprs[i] = field => 
-#         else
-#             exprs[findfirst(x->x==field,fields)] = Expr(:call, :zero, T)
-#         end
-#     end
-#     [:(getproperty())]
-# end 
 
 function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},bn::NamedTuple,adj,saveat::Union{AbstractFloat,AbstractVector} = []) where{T}
     
@@ -776,7 +765,7 @@ function CRC.rrule(::typeof(admittance_matrix),solfw::EnsembleSolution{T,N,S},ad
             Δd .+= view(ȳ,i_,i_) + view(ȳ,j_,j_)
 
             # Pullback der elementweisen Multiplikation mit d0
-            ∂adj[id] += sum(d0 .* Δd )#./ normfactor_m(beam))
+            ∂adj[id] += sum(d0 .* Δd ) #./ normfactor_m(beam))
         end
         idxs = getindices(size(adj,1)) 
         # ∂adj = -(∂adj.- mean(abs,∂adj[idxs])./ sqrt(var(∂adj[idxs]) + eps(eltype(∂adj)))) #/ 10

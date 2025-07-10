@@ -149,20 +149,24 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
     # idcs = LinearIndices(residuals)#CartesianIndices((1:3,1:fld(length(residuals),3))))
     adj = str.AdjMat
     nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
-    start = 1
+    branches = count(x->isa(x,Branch),bn.Nodes)
+    residuals_forces = @view residuals[:,1:branches]
+    residuals_positions = @view residuals[:,branches+1:end]
+    forces = 1
+    positions = 1
     for n in getnodeswithbeams(adj,bn.Nodes)
         node = bn.Nodes[n]
         beams = findbeamsatnode(node,n,nodes)
         res = reduceforceat(node,bn.Beams,y,beams)
         if !isempty(res)
-            residuals[:,start] .= res
-            start += 1
+            residuals_forces[:,forces] .= res
+            forces += 1
         end 
         res = reduceposat(node,bn.Beams,y,beams)
         if !isempty(res)
-            idxs = start:start + size(res,2) - 1
-            residuals[:,idxs] .= res
-            start = idxs[end] + 1
+            idxs = positions:positions + size(res,2) - 1
+            residuals_positions[:,idxs] .= res
+            positions = idxs[end] + 1
         end  
     end
     residuals 
@@ -253,23 +257,17 @@ function (str::Structure)(residuals::T,values::T,bn::NamedTuple) where{T} #new l
     residuals!(residuals,str,sols,bn_)
 end 
 
-
-
 function getinitials(str::Structure,nb::NamedTuple)
     nodes = nb.Nodes
     beams = nb.Beams
-    adjpos = findall(x->!isapprox(x,0),LowerTriangular(str.AdjMat))
     initsize = length(beams) + sum(x->isa(x,Branch),values(nodes))
-    # for ap in adjpos
-    #     initsize += isa(nodes[ap[2]],Branch) ? 1 : 0
-    # end 
-
     return  (3,initsize)
 end 
 
 function Base.zeros(::Type{T},str::Structure,nb::NamedTuple) where{T}
     zeros(T,getinitials(str,nb))
 end 
+
 
 function Random.rand(::Type{T},str::Structure,nb::NamedTuple) where{T}
     rand(T,getinitials(str,nb))

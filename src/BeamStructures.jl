@@ -1,11 +1,10 @@
 module BeamStructures
-   
-    # using DataFrames
-    # using JLD2
-    # using XLSX
+
     using LinearAlgebra
     using Statistics
     using DifferentialEquations
+    using NonlinearSolve
+    using Zygote
     using SciMLSensitivity
     using Setfield
     using Random
@@ -14,9 +13,6 @@ module BeamStructures
     using InteractiveUtils
     import ChainRulesCore as CRC
 
-    # using ComponentArrays
-    
-    
     include("Beams.jl")
     include("Boundaries.jl")
     include("Connections.jl")
@@ -25,8 +21,11 @@ module BeamStructures
     include("utils.jl")
     # include("Bibliography.jl")
     include("ChainRulesExt.jl")
-
+    include("Optimizations.jl")
+    
     export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand
+
+    export learningrate,changenode
 
     export Boundary,ExtForces, Clamp, Branch, Free, Structure,residuals!,getinitials
 
