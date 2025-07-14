@@ -207,8 +207,7 @@ function residuals!(residuals::Matrix,adj::AbstractMatrix{TA},y::AbstractArray{T
     branches = count(x->isa(x,Branch),bn.Nodes)
     residuals_forces = @view residuals[:,1:branches]
     residuals_positions = @view residuals[:,branches+1:end]
-    # idcs = LinearIndices(residuals)
-    # nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
+
     forces = 1
     positions = 1
     for n in axes(adj,1)

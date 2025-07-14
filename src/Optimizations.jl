@@ -5,21 +5,15 @@ function changenode(bn,node::Symbol,nt::NamedTuple)
     n = (;Beams = bn.Beams,Nodes = (;bn.Nodes..., node => ntmp)) 
 end 
 
-function solve_structure(str,bn,graph,node)
-    tmp = Vector{Float32}(undef,size(graph,2))
-    inits = zeros(Float32,str,nb)
-    for col in axes(graph,2)
-        Δx,f = graph[:,col] 
-        bnx = changenode(bn,node,Δx)
-        inits = zeros(Float32,bnx,str)
-        prob = NonlinearLeastSquaresProblem(str,inits,p = bnx)
-        sol = solve(prob,TrustRegion(),maxiters = 1000,sensealg = ZygoteAdjoint())
-        tmp[col] = sol.u[2,end]
-    end 
-    tmp
+function solve_structure(str,bn,Δx,node)
+    bnx = changenode(bn,node,(;x = Δx))
+    inits = zeros(Float32,str,bn) # reset initial values for each column
+    prob = NonlinearLeastSquaresProblem(str,inits,p = bnx)
+    sol = solve(prob,TrustRegion(),sensealg = ZygoteAdjoint(),maxiters = 1000,reltol = 1e-2,abstol = 1e-2)
+    sol,SciMLBase.successful_retcode(sol)
 end 
      
-function loss(loss,sols,res,fsoll)
+function loss(loss,sols,res,fsoll,idxs)
     losspos = mean(abs2,res[:,2:end] .* [1,1,1])
     lossf =  1 * sum(abs2,res[:,1])
     lossn4 = 1 * sum(abs2,sols[6,2,idxs]) #force at node 4
@@ -44,7 +38,7 @@ function loss_structure(str,parameters::Dict,graph,node;kwargs...)
         lossf =  1 * sum(abs2,res[:,1])
         lossn4 = 1 * sum(abs2,sols[6,2,idxs]) #force at node 4
         lossf4 = 1 * abs2(sum(sols[5,2,idxs]) .- fxsoll) 
-        loss = loss(loss,res,sols,fxsoll,bn) #* exp(-iterations/1000)) .* ((cos(iterations * π/100)^2) 
+        loss = loss(loss,res,sols,fxsoll,bn,idxs) #* exp(-iterations/1000)) .* ((cos(iterations * π/100)^2) 
                       # (sin(iterations * π/100)^2) *
     end 
         sqrt(loss) + (4 * ((bn.Beams[1].h - bn.Beams[2].h)^2 + (bn.Beams[1].h - bn.Beams[3].h)^2) 

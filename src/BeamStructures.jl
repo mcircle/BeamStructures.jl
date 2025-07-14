@@ -6,6 +6,7 @@ module BeamStructures
     using NonlinearSolve
     using Zygote
     using SciMLSensitivity
+    using SciMLBase
     using Setfield
     using Random
     using Optimisers

@@ -374,9 +374,13 @@ end
 function CRC.rrule(::typeof(residuals!),residuals,str::Structure,y,bn)
     ind = 1
     adj = str.AdjMat
-    idcs = LinearIndices(residuals)
+    # idcs = LinearIndices(residuals)
     nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
-    start = 1
+    branches = count(x->isa(x,Branch),bn.Nodes)
+    residuals_forces = @view residuals[:,1:branches]
+    residuals_positions = @view residuals[:,branches+1:end]
+    forces = 1
+    positions = 1
     resposdict = Dict{Int,AbstractRange{Int}}()
     resforcedict = Dict{Int,Int}()
     rrposdict = Dict{Int,Function}()
@@ -386,35 +390,38 @@ function CRC.rrule(::typeof(residuals!),residuals,str::Structure,y,bn)
         beams = findbeamsatnode(node,n,nodes)
         res, pullback_reduceforceat = rrule(reduceforceat,node,bn.Beams,y,beams)
         if !isempty(res)
-            residuals[idcs[:,start]] .= res
-            resforcedict[n] = start
+            residuals_forces[:,forces] .= res
+            resforcedict[n] = forces
             rrforcedict[n] = pullback_reduceforceat
-            start += 1
+            forces += 1
         end 
         res, pullback_reduceposat = rrule(reduceposat,node,bn.Beams,y,beams)
         if !isempty(res)
-            idxs = start:start + size(res,2) - 1
+            idxs = positions:positions + size(res,2) - 1
             resposdict[n] = idxs
             rrposdict[n] = pullback_reduceposat
-            residuals[idcs[:,idxs]] .= res
-            start = idxs[end] + 1
+            residuals_positions[:,idxs] .= res
+            positions = idxs[end] + 1
         end  
     end
     function residuals!_back(ȳ)
         ∂res = ZeroTangent()
         ∂y = zero(y) 
         # ȳ_ = (ȳ)./(sqrt(var(ȳ)) + eps(eltype(ȳ)))
+        ȳ_forces = @view ȳ[:,1:branches]
+        ȳ_positions = @view ȳ[:,branches+1:end]
+
         ∂beams = Tangent{typeof(bn.Beams)}(;ntuple(x->keys(bn.Beams)[x] =>ZeroTangent(),length(bn.Beams))...)        
         ∂nodes = Tangent{typeof(bn.Nodes)}(;ntuple(x->keys(bn.Nodes)[x] =>ZeroTangent(),length(bn.Nodes))...)
         for (ind,pos) in resforcedict
-            _,dnode,dbeams,dy,_ =rrforcedict[ind](ȳ[idcs[:,pos]])
+            _,dnode,dbeams,dy,_ =rrforcedict[ind](ȳ_forces[:,pos])
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams += dbeams
             ∂y .+= dy 
         end
 
         for (ind,pos) in resposdict
-            _,dnode,dbeams,dy,_ = rrposdict[ind](ȳ[idcs[:,pos]])
+            _,dnode,dbeams,dy,_ = rrposdict[ind](ȳ_positions[:,pos])
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams += dbeams
             ∂y .+= dy
@@ -433,7 +440,13 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
     idcs = getindices(size(adj_,1))
     adj = ifelse.(adj_ .> 1,one(T),adj_ )
     adj = ifelse.(adj .< 0, zero(T),adj_ )
-    start = 1
+    # start = 1
+    branches = count(x->isa(x,Branch),bn.Nodes)
+    residuals_forces = @view residuals[:,1:branches]
+    residuals_positions = @view residuals[:,branches+1:end]
+
+    forces = 1
+    positions = 1
     resposdict = Dict{Int,AbstractRange{Int}}()
     resforcedict = Dict{Int,Int}()
     rrposdict = Dict{Int,Function}()
@@ -444,18 +457,18 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
         
         res, pullback_reduceforceat = rrule(reduceforceat,node,bn.Beams,y,adj[idcs],beams)
         if !isempty(res)
-            residuals[:,start] .= res
-            resforcedict[n] = start
+            residuals_forces[:,forces] .= res
+            resforcedict[n] = forces
             rrforcedict[n] = pullback_reduceforceat
-            start += 1
+            forces += 1
         end 
         res, pullback_reduceposat = rrule(reduceposat,node,bn.Beams,y,adj[idcs],beams)
         if !isempty(res)
-            idxs = start:start + size(res,2) - 1
+            idxs = positions:positions + size(res,2) - 1
             resposdict[n] = idxs
             rrposdict[n] = pullback_reduceposat
-            residuals[:,idxs] .= res
-            start = idxs[end] + 1
+            residuals_positions[:,idxs] .= res
+            positions = idxs[end] + 1
         end  
     end    
     function residuals!_back(ȳ)
@@ -465,8 +478,12 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
         ∂beams = Tangent{typeof(bn.Beams)}(;ntuple(x->keys(bn.Beams)[x] =>CRC.zero_tangent(bn.Beams[x]),length(bn.Beams))...)        
         ∂nodes = Tangent{typeof(bn.Nodes)}(;ntuple(x->keys(bn.Nodes)[x] =>CRC.zero_tangent(bn.Nodes[x]),length(bn.Nodes))...)
 
+        ȳ_forces = @view ȳ[:,1:branches]
+        ȳ_positions = @view ȳ[:,branches+1:end]
+
+
         for (ind,pos) in resforcedict
-            _,dnode,dbeams,dy,df =rrforcedict[ind](ȳ[:,pos])
+            _,dnode,dbeams,dy,df =rrforcedict[ind](ȳ_forces[:,pos])
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams += dbeams
             ∂y .+= dy 
@@ -474,7 +491,7 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
         end
         
         for (ind,pos) in resposdict
-            _,dnode,dbeams,dy,df = rrposdict[ind](ȳ[:,pos])
+            _,dnode,dbeams,dy,df = rrposdict[ind](ȳ_positions[:,pos])
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams +=  dbeams
             ∂y .+= dy
