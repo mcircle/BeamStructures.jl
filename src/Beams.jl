@@ -35,7 +35,12 @@ function Beam{T}(l,h,w,κ0;E = 2.1f5,θs = 0f0,θe = θs + l*κ0) where{T}
     # w_ = relu(w,1f-2)
     Beam(T.([l,h,w,κ0,E,θs,θe])...)
 end 
-
+# function Beam{T}(l,h,w,κ0,E = 2.1f5,θs = 0f0,θe = θs + l*κ0) where{T}
+#     # l_ = relu(l)
+#     # h_ = relu(h,1f-2)
+#     # w_ = relu(w,1f-2)
+#     Beam(T.( [l,h,w,κ0,E,θs,θe])...)
+# end
 # function Beam{T}(l::D,h::D,w::D,κ0::D,E::D,θs::D,θe::D) where{T,D}
 #     l_ = inverse_softplus(l)
 #     h_ = inverse_softplus(h)
@@ -109,6 +114,35 @@ Optimisers._trainable(b::Beam{T},fr) where{T} = Beam{T}(merge(Optimisers.mapvalu
 
 Base.zero(::Beam{T}) where{T} = Beam(zeros(T,7)...)
 
+BEAM_SCALE = (
+    l = 1,
+    h = 1,
+    w = 1,
+    κ0 = 1,
+    E = 1,
+    θs = 1,
+    θe = 1
+)
+
+
+@generated function scale_beam(dx,b::B, scale) where{T,B<:Beam{T}} 
+    fields = fieldnames(dx)
+    # println(fields)'
+
+    exprs = [:( getproperty(dx, $(QuoteNode(f))) * getproperty(scale,$(QuoteNode(f)) )) for f in fields]
+    return quote
+        $(Expr(:call, :B, exprs...))
+    end
+end
+
+@generated function invscale_beams(dx,::B, scale) where{T,B<:Beam{T}}
+    fields = fieldnames(dx)
+    exprs = [:( getproperty(dx, $(QuoteNode(f))) / getproperty(scale, $(QuoteNode(f)))) for f in fields]
+    return quote
+        $(Expr(:call, :B, exprs...))
+    end
+end
+
 @generated function combine(β,mt::Beam{T},dx) where{T}
     fields = fieldnames(mt)
     # exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
@@ -137,11 +171,12 @@ end
 function Optimisers.apply!(o::Adam,state,b::Beam{T},dx) where{T}
     η, β, ϵ = T(o.eta), T.(o.beta), T(o.epsilon)
     mt, vt, βt = state
-    
+    # dx_scaled = scale_beam(dx,mt,BEAM_SCALE)
     mt = combine(β[1],mt,dx)
     vt = combineabs2(β[2],vt,dx)
-    dx′ = combine(η,βt,mt,vt,ϵ) #  mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
-    return (mt, vt, βt .* β), dx′
+    dx_scaled = combine(η,βt,mt,vt,ϵ) #  mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
+    # dx′ = invscale_beams(dx_scaled,mt,BEAM_SCALE)
+    return (mt, vt, βt .* β), dx_scaled
 end 
 
 Optimisers.init(o::AdamW, x::Beam{T}) where T = (Beam{T}(zeros(T,4)...), Beam{T}(zeros(T,4)...), T.(o.beta))

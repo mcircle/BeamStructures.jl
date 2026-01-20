@@ -1,13 +1,19 @@
-learningrate(it,pars = 200,warmups = 200) = √(pars) \ min(1/√(it),it / sqrt(warmups^3))
-
+learningrate(it,pars = 200,warmups = 200) = √(it) \ min(1/√(pars),it / sqrt(warmups^3))
+cos_learningrate(it,base = 1e-5,peak = 1e-2,period = 1000,off = 0) = base + 0.5 * (peak - base) * (1 + cos(2π * (it % period) / period + off))/sqrt(it)
 function changenode(bn,node::Symbol,nt::NamedTuple)
     ntmp = bn.Nodes[node] + nt  
     n = (;Beams = bn.Beams,Nodes = (;bn.Nodes..., node => ntmp)) 
 end 
+function changenode(bn,node::Vector{Symbol},nt::NamedTuple)
+    tmps = Vector{Pair{Symbol,Boundary}}()
+    for n in node
+        push!(tmps,n => bn.Nodes[n] + nt)
+    end 
+    n = (;Beams = bn.Beams,Nodes = (;bn.Nodes..., tmps...)) 
+end 
 
-function solve_structure(str,bn,Δx,node)
+function solve_structure(str,bn,Δx,node,inits = zeros(Float32,str,bn))
     bnx = changenode(bn,node,(;x = Δx))
-    inits = zeros(Float32,str,bn) # reset initial values for each column
     prob = NonlinearLeastSquaresProblem(str,inits,p = bnx)
     sol = solve(prob,TrustRegion(),sensealg = ZygoteAdjoint(),maxiters = 1000,reltol = 1e-2,abstol = 1e-2)
     sol,SciMLBase.successful_retcode(sol)
@@ -16,7 +22,7 @@ end
 function loss(loss,sols,res,fsoll,idxs)
     losspos = mean(abs2,res[:,2:end] .* [1,1,1])
     lossf =  1 * sum(abs2,res[:,1])
-    lossn4 = 1 * sum(abs2,sols[6,2,idxs]) #force at node 4
+    # lossn4 = 1 * sum(abs2,sols[6,2,idxs]) #force at node 4
     lossf4 = 1 * abs2(sum(sols[5,2,idxs]) .- fsoll) 
     loss + (losspos + lossf + lossn4 + lossf4)^2
 end 
@@ -30,7 +36,7 @@ function loss_structure(str,parameters::Dict,graph,node;kwargs...)
     idxs = BeamStructures.findbeamsatnode(bn.Nodes[4],4,ids)[1]#[2,4]
     for ind in axes(graph,2)
         fxsoll =  graph[2,ind]
-        bn_ = changenode(bn,(;x = graph[1,ind]))
+        bn_ = changenode(bn,(;x = graph[ind]))
         sols,bnx_ = str(inits[:,:,ind],bn_)
         # @show size(sols)
         res = BeamStructures.residuals!(res,str,sols,bnx_)

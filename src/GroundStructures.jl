@@ -12,14 +12,14 @@ function GroundStructure(;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kw
 end 
 
 function (str::GroundStructure)(x::AbstractMatrix{T},bn::NamedTuple,adj::AbstractMatrix{TA},saveat::Union{AbstractFloat,AbstractVector}) where{T,TA}
-    x_ = reshape(x,3,:)
+    # x_ = reshape(x,3,:)
     
     nodepos = getstartnodes(adj)
     cbeams = reduce(+,1:size(adj,1)-1)
-    anz,nodes_ = changestartnodes(bn.Nodes,x_)
+    xforces,nodes_ = changestartnodes(bn.Nodes,x)
     function prob_func(prob,i,repeat) 
         
-        u0 = initialize_beam(bn.Beams,nodes_,x_[:,anz+1:end],nodepos,i)
+        u0 = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
         remake(prob;u0 = u0)
     end 
 
@@ -47,32 +47,23 @@ function reduction_func_admittance!(u,data,I,solfw,adj,beams)
         isapprox(adj[id],0) && continue
         l = beam.l
         d = d0 .* adj[id] 
-        # f = [4    6*l  6*l;
-        #        6*l 12*l^2 12*l^2;
-        #        6*l 12*l^2 12*l^2]
-        # d .*=       [18 36 36; 
-        #         18 12 12;
-        #         18 12 12]
-        for i in 1:3
-            iszero(d[i,i]) || continue 
-            d[i,i] += 12/beam.h^2
-        end
+
         x,y = sol[end][3:4] .- sol[1][3:4]
         # 1 = M, 2 = Fx , 3 = Fy
         i = id[1]
         j = id[2]
         i_ = 3 * (i-1)+1:3*i 
         j_ = 3 * (j-1)+1:3*j
-        u[i_,i_] .+= d #.*f
-        u[j_,j_] .+= d #.*f
-        d[1,:] .= (-d[1,:] .+ y .* d[2,:] .+ x .* d[3,:])
-        # d[2:3,2:3] .*= -1
-        u[i_,j_] .+= d #.* f 
-        u[j_,i_] .+= d' #.*f'
+        u[i_,i_] .+= d
+        u[j_,j_] .+= d
+        d[1,:] .= (-d[1,:] .+ y .* d[2,:] .- x .* d[3,:])
+        
+        u[i_,j_] .-= d 
+        u[j_,i_] .-= d' 
     end 
     for (idx,val) in enumerate(diag(u))
         iszero(val) || continue
-        u[idx,idx] .= one(eltype(val)) # avoid singularity
+        u[idx,idx] = eps(eltype(val)) # avoid singularity
     end
     u,false
 end 
@@ -99,7 +90,7 @@ sigmoid(x) = 1 ./ (1 .+ exp.(-x))
 
 function admittance_matrix(sol::EnsembleSolution{T,N,S},adj,str,beams) where{T,N,S}
     # adj = sigmoid(adj)
-    idxs =findall(x->!isapprox(x,0),LowerTriangular(adj))
+    idxs = getindices(size(adj,1))
     lensol = length(sol)
     function prob_func(prob,i,repeat) 
         u0 = zeros(T,7,3)
@@ -181,7 +172,7 @@ function (str::GroundStructure)(residuals::T,values::T,bn::NamedTuple,adj) where
     residuals!(residuals,adj,sols,bn_)
 end 
 
-function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},factors::AbstractVector{TF},beamnbrs) where{T,TF}
+function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,N},factors::AbstractVector{TF},beamnbrs) where{T,TF,N}
     # @show beamnbrs
     res = map((ind)-> factors[ind] .* ([node.ϕ,node.x,node.y] .- scalepos(beams[ind],y[2:4,2,ind],Val(2))),beamnbrs[1])
     if isempty(res)
@@ -210,7 +201,7 @@ function residuals!(residuals::Matrix,adj::AbstractMatrix{TA},y::AbstractArray{T
 
     forces = 1
     positions = 1
-    for n in axes(adj,1)
+    for n in getnodeswithbeams(adj,bn.Nodes)#axes(adj,1)
         node = bn.Nodes[n]
         beams = findbeamsatnode(node,n,ids)
         res = reduceforceat(node,bn.Beams,y,adj[ids],beams)

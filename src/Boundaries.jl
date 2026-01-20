@@ -168,15 +168,9 @@ Base.:/(b::T,a::Real)where{T<:Boundary} = T(b ./ a...)
 function Base.:+(a::T,b::NamedTuple) where{T<:Boundary} 
     T(map(x->hasproperty(b,x) ? getfield(a,x) + getfield(b,x) : getfield(a,x),fieldnames(T))...)
 end
-# function CRC.rrule(::typeof(Base.:+), a::T, b::NamedTuple) where{T<:Boundary}
-#     ab = T(map(x->hasproperty(b,x) ? getfield(a,x) + getfield(b,x) : getfield(a,x),fieldnames(T))...), 
-#     function back_add_nt(dy)
-#         da = Tangent{T}(map(x->hasproperty(b,x) ? x -> getfield(dy,x) : nothing,fieldnames(T))...)
-#         db = Tangent{typeof(b)}(map(x->hasproperty(b,x) ? x -> getfield(dy,x) : nothing,fieldnames(T))...)
-#         return CRC.NoTangent(),da,db
-#     end
-#     return ab,back_add_nt
-# end
+
+Base.zero(::Type{T}) where{T<:Boundary} = T(zeros(eltype(T),6)...)
+
 
 Optimisers.functor(x::T) where{T<:Boundary} = (NamedTuple{fieldnames(T)}(x[1:end]),T)
 Optimisers.init(o::Adam, x::B) where{B<:Boundary{T}} where{T}  = (B(zeros(T,6)...), B(zeros(T,6)...), T.(o.beta))
@@ -188,10 +182,34 @@ Optimisers.subtract!(a::T,b::T) where{T<:Boundary{TT}} where{TT} = a - T(merge(O
 Optimisers.init(o::OptimiserChain, x::Boundary) = map(opt -> Optimisers.init(opt, x), o.opts)
 Optimisers._trainable(b::T,fr) where{T<:Boundary} =T(merge(Optimisers.mapvalue(_ -> nothing, Optimisers.functor(b)[1]), Optimisers.trainable(b)))
 
+BOUNDARYSCALE = (
+    x  = 1,      # 1 m bleibt 1
+    y  = 1,
+    ϕ  = 0,      # Winkel ϕ 10x „langsamer“ updaten
+    fx = 1,      # ggf. eigene Wahl
+    fy = 1,
+    mz = 1,
+)
 
+
+@generated function scale_boundary(dx,::B, scale) where{B<:Boundary} 
+    fields = fieldnames(dx)
+    exprs = [:( getproperty(dx, $(QuoteNode(f))) * getproperty(scale,$(QuoteNode(f)) )) for f in fields]
+    return quote
+        $(Expr(:call, :B, exprs...))
+    end
+end
+
+@generated function invscale_boundary(dx,::B, scale) where{B<:Boundary}
+    fields = fieldnames(dx)
+    exprs = [:( getproperty(dx, $(QuoteNode(f))) / getproperty(scale, $(QuoteNode(f)))) for f in fields]
+    return quote
+        $(Expr(:call, :B, exprs...))
+    end
+end
 
 @generated function combine(β,mt::B,dx) where{T,B<:Boundary{T}}
-    fields = fieldnames(mt)
+    fields = fieldnames(dx)
     exprs = [:(isnothing(getproperty(dx, $(QuoteNode(f)))) ? zero(T) : β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
     return quote
         $(Expr(:call, :B, exprs...))
@@ -199,7 +217,7 @@ Optimisers._trainable(b::T,fr) where{T<:Boundary} =T(merge(Optimisers.mapvalue(_
 end 
 
 @generated function combineabs2(β,mt::B,dx) where{T,B<:Boundary{T}}
-    fields = fieldnames(mt)
+    fields = fieldnames(dx)
     exprs = [:(isnothing(getproperty(dx, $(QuoteNode(f)))) ? zero(T) : β * getproperty(mt, $(QuoteNode(f))) + (1-β) * abs2(getproperty(dx, $(QuoteNode(f))))) for f in fields]
     return quote
         $(Expr(:call, :B, exprs...))
@@ -214,14 +232,18 @@ end
     end
 end
 
+
+
 function Optimisers.apply!(o::Adam,state,b::BT,dx) where{BT<:Boundary{T}} where{T}
     η, β, ϵ = T(o.eta), T.(o.beta), T(o.epsilon)
     mt, vt, βt = state
     
+    # dx_scaled = scale_boundary(dx,mt,BOUNDARYSCALE)
     mt =combine(β[1],mt,dx) # β[1] * mt + (1 - β[1]) * dx
     vt = combineabs2(β[2],vt,dx) # β[2] * vt + (1 - β[2]) * abs2(dx)
-    dx′ = combine( η,βt,mt,vt,ϵ) # mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
-  
+    dx_scaled = combine( η,βt,mt,vt,ϵ) # mt / (1 - βt[1]) / (sqrt(vt / (1 - βt[2])) + ϵ) * η
+     # 3) Schritt zurück in physikalische Einheiten transformieren
+     dx′ = scale_boundary(dx_scaled,mt,BOUNDARYSCALE)
     return (mt, vt, βt .* β), dx′
 end 
 
