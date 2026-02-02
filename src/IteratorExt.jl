@@ -1,28 +1,4 @@
-# struct Adjency{T} <: AbstractMatrix{T}
-#     Matrix::Dict{Int,AbstractVector{T}}
-#     function Adjency(a::AbstractMatrix{T}) where{T}
-#         pos = findall(x->x != zero(T),a)
-#         adj = Dict{Int,Vector{T}}()
-#         for p in pos 
-#             adj[p]= one(T)
-#         end 
-#         new{eltype(first(first(values(a))))}(adj)
-#     end
-# end
 
-# Base.size(adj::Adjency) = Tuple(maximum(keys(adj.Matrix)))
-
-# function Base.getindex(adj::Adjency{T},i::Int,j::Int) where{T}
-#     p = CartesianIndex(i,j)
-#     if haskey(adj.Matrix,p)
-#         return adj.Matrix[p]
-#     end
-#     return zero(eltype(adj))
-# end
-
-
-# using BeamStructures
-# using LinearAlgebra
 struct BeamsAtNode{T}
     adj::AbstractMatrix{T} #Dict{CartesianIndex,T}
     nodes::NamedTuple

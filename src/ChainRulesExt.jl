@@ -270,7 +270,7 @@ function CRC.rrule(::typeof(initialize_beam),node::No,beam::BeamElement{BT},pars
     x,y,θ0, = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0
     m,fx,fy = pars .* normvector(beam) #am Balkenelement
-    result = [m,θ0 + θs,x./l,y./l,fx,fy,κ*l]
+    result = @SVector [m,θ0 + θs,x./l,y./l,fx,fy,κ*l]
     init_beam_back(ȳ) = pullback_init_beam(ȳ,node,beam,pars)
     return result, init_beam_back
 end 
@@ -302,7 +302,7 @@ end
 function CRC.rrule(::typeof(reduceforceat),node::No,beams,y,idxs) where{No}
     
     sol = reduceforceat(node,beams,y,idxs)
-    function force_bound_back(ȳ,∂beams::Tangent{BT} = zero_tangent(beams)) where{BT}
+    function force_bound_back(ȳ,∂beams::Tangent{BT} = CRC.zero_tangent(beams)) where{BT}
 
         y_idxs = getforceindices(idxs)
         ∂y = CRC.zero_tangent(y)
@@ -330,7 +330,7 @@ end
 function CRC.rrule(::typeof(reduceforceat),node::No,beams,y::AbstractArray{T,3},factors,idxs) where{T,No}
 
     sol = reduceforceat(node,beams,y,factors,idxs)
-    function force_bound_back(ȳ,∂beams::Tangent{BT} = zero_tangent(beams)) where{BT}
+    function force_bound_back(ȳ,∂beams::Tangent{BT} = CRC.zero_tangent(beams)) where{BT}
         
         y_idxs = getforceindices(idxs)
         ∂y = CRC.zero_tangent(y)
@@ -514,10 +514,9 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
         
         # for (ind,pos) in resposdict
         for (ind,(pos,rrpos_rule)) in enumerate(rrpos)    
-            _,_,dbeams,dy,_ = rrposdict[ind](ȳ_positions[:,pos],∂beams)
-            ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
+            _,dnode,_,dy,_ = rrpos_rule[ind](ȳ_positions[:,pos],∂beams)
+            ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,positional_nodes[ind]) => dnode)
             ∂y .+= dy
-
             # ∂fac[idcs] .+= df
         end 
         ∂bn = Tangent{typeof(bn)}(;Beams = ∂beams,Nodes = ∂nodes)
@@ -615,14 +614,41 @@ function reduction_func!(u,data,I)
     u,false
 end 
 
+function totangent(::T,x) where{BT,T<:CRC.StructuralTangent{BT}}
+    T((getproperty(x, fname) for fname in fieldnames(x))...)
+end
+
+@generated function generate_tangent(::Val{N}, ::Type{BN}, dbeams) where {N,Nt,Bt<:BeamElement,BN<:NamedTuple{Nt,NTuple{N,Bt}}}
+    fields = Expr(:tuple)
+    for i = 1:N
+        push!(fields.args, :(Nt[$i] => CRC.MutableTangent{$Bt}(CRC.backing(dbeams[$i]))))
+    end
+    quote
+        CRC.MutableTangent{$BN}(;$fields...)  
+    end
+end
+
+@generated function generate_tangent(::Val{N}, ::Type{NT}, dnodes) where {N,T1,T2,NT<:NamedTuple{T1,T2}}
+    # @show T1,T2
+    TB = getfield(T2,:3)
+    fields = Expr(:tuple)
+    for i = 1:N
+        push!(fields.args, :(T1[$i] => CRC.MutableTangent{$TB[$i]}(CRC.backing(dnodes[$i]))))
+    end
+    quote
+        CRC.MutableTangent{$NT}(;$fields...)  
+    end
+end
+
+
 function u_init(x, bn,dbeams,dnodes)
     dx = similar(x)
     for i in axes(x,2)
         dx[:,i] .= x[:,i] .* normvector(bn.Beams[i])
     end    
     [dx,
-    ZeroTangent(),
-    ZeroTangent(),
+    ZeroTangent(),#generate_tangent(Val(length(bn.Beams)), typeof(bn.Beams), dbeams),
+    ZeroTangent(),#generate_tangent(Val(length(bn.Nodes)), typeof(bn.Nodes), dnodes)
     ]
 end 
 
