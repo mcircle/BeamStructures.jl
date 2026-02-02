@@ -595,11 +595,11 @@ function CRC.rrule(::typeof(changestartnodes),nodes,x)
     return (xforces,nodes_),changeback
 end 
 
-function output_func(u,beams,nodes,nodepos,x,i)
+function output_func(u,beams,nodes,nodepos,x,i,symbolcache)
     x_idxs = nodepos[i]
     _,dnode,dbeam,∂xforces = pullback_init_beam(u(0),nodes[x_idxs],beams[i],x[:,i])
-    ∂beams = Tangent{typeof(beams)}(;Symbol(:Beam_,i) => dbeam)
-    ∂nodes = Tangent{typeof(nodes)}(;Symbol(:Node_,x_idxs) => dnode)
+    ∂beams = Tangent{typeof(beams)}(;symbolcache[1][i] => dbeam)
+    ∂nodes = Tangent{typeof(nodes)}(;symbolcache[2][x_idxs] => dnode)
     (∂beams,∂nodes,∂xforces),false
 end 
 
@@ -728,14 +728,14 @@ function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},bn::NamedTuple,adj)
         @inbounds ∂sol,∂bn = ȳ
         ∂Beams = ∂bn.Beams   
         ∂Nodes = ∂bn.Nodes
-        
+        symbolcache = (keys(bn.Beams),keys(bn.Nodes))
         function prob_func(prob,i,repeat) 
             u0 = @view ∂sol[:,2,i]
             remake(prob;u0 = u0,p = sol[i],tspan = (one(T),zero(T)))
         end
         #integriere Rückwärtsproblem
         ensprob  =  EnsembleProblem(vjpprob;prob_func = prob_func,
-                                            output_func = (sol,i) -> output_func(sol,∂sol,bn.Beams,nodes_,nodepos,xforces,i),
+                                            output_func = (sol,i) -> output_func(sol,bn.Beams,nodes_,nodepos,xforces,i,symbolcache),
                                             reduction = (u,data,I) -> reduction_func!(u,data,I),
                                             u_init = u_init(xforces,bn,∂Beams,∂Nodes)
                                             )
