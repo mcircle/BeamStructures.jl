@@ -3,12 +3,12 @@ function getnames(nodes::Vararg{Boundary,N}) where{N}
     NamedTuple{ntuple(i->Symbol(:Node_,i),N)}(nodes)
 end 
 
-function getnames(beams::Vararg{Beam,N}) where{N}
+function getnames(beams::Vararg{B,N}) where{N,B<:BeamElement}
     NamedTuple{ntuple(i->Symbol(:Beam_,i),N)}(beams)
 end 
 
-function prepare(args::Vararg{Union{Beam,Boundary},N}) where{N}
-    beams = filter(x->isa(x,Beam),args)
+function prepare(args::Vararg{Union{B,Boundary},N}) where{N,B<:BeamElement}
+    beams = filter(x->isa(x,BeamElement),args)
     bounds = filter(x->isa(x,Boundary),args)
     (;Beams = getnames(beams...),Nodes = getnames(bounds...))        
 end 
@@ -17,6 +17,7 @@ function getstartnodes(str::Structure)
     adj = str.AdjMat
     getindex.(findall(x->!isapprox(x,0),LowerTriangular(adj)),2)
 end 
+
 function getstartnodes(adj::AbstractMatrix{T}) where{T}
     sz = size(adj,1)-1
     len = reduce(+,1:sz)
@@ -29,6 +30,19 @@ function getstartnodes(adj::AbstractMatrix{T}) where{T}
     return    nodes
 end 
 @non_differentiable getstartnodes(adj)
+
+function getnodeswithbeams(adj::AbstractMatrix,nodes::NamedTuple)
+    nodeswithbeams = Vector{Int}()
+    for ap in axes(adj,1)
+        if isa(nodes[ap],Branch) 
+            push!(nodeswithbeams,ap)
+        elseif isa(nodes[ap],Clamp) && ap > 1 && sum(adj[1:ap,ap]) > 0 
+            push!(nodeswithbeams,ap)
+        end
+    end 
+    return nodeswithbeams
+end   
+
 
 indexlength(::Branch) = 6
 indexlength(::Boundary) = 3
@@ -47,9 +61,6 @@ function gaussfilter(x,μ = 0,σ = 1f-1)
    @. exp(-((x - μ) / σ)^2 /2) #./ (σ * sqrt(2π))
 end
 
-# function softmax(x)
-#     exp.(x) ./ (sum(exp,x) .+ eps(eltype(x)))
-# end
 function softmax(x;dims = 1)
     tmp = zero(x)
     for (tm,xt) in zip(eachslice(tmp;dims = dims),eachslice(x,;dims = dims))
@@ -65,11 +76,16 @@ switchCI(a::CartesianIndex{2}) = CartesianIndex((a[2],a[1]))
 @non_differentiable switchCI(a)
 
 findbeamsatnode(::Clamp,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x-> x[1] == node,nodes),Vector{Int}())
-findbeamsatnode(::Branch,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x->x[1] == node,nodes),findall(x-> x[2] == node,nodes))
+findbeamsatnode(::Boundary,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x->x[1] == node,nodes),findall(x-> x[2] == node,nodes))
+normfactor(b::BeamElement) = 12 / (b.E*b.w*b.h^3) # 12/(E*I)
+normfactor_m(b::BeamElement) = normfactor(b) * b.l #M̃ = M * normvector_m
+normfactor_f(b::BeamElement) = b.l * normfactor_m(b) #F̃ = F * normvector_f
 
-normfactor_m(b::Beam) = 12* b.l/(b.E*b.w*b.h^3) #M̃ = M * normvector_m
-normfactor_f(b::Beam) = b.l * normfactor_m(b) #F̃ = F * normvector_f
-normvector(b::Beam) = [normfactor_m(b),normfactor_f(b),normfactor_f(b)]
+function normvector(b::BeamElement)
+    m = normfactor_m(b)                  # normfactor_m
+    f = b.l * m                          # normfactor_f
+    return @SVector [m, f, f]    
+end
 
 getside(x,beams) = ifelse(x ∈ beams[1],2,1)
 

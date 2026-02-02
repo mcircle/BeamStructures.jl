@@ -4,6 +4,7 @@ function changenode(bn,node::Symbol,nt::NamedTuple)
     ntmp = bn.Nodes[node] + nt  
     n = (;Beams = bn.Beams,Nodes = (;bn.Nodes..., node => ntmp)) 
 end 
+
 function changenode(bn,node::Vector{Symbol},nt::NamedTuple)
     tmps = Vector{Pair{Symbol,Boundary}}()
     for n in node

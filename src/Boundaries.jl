@@ -92,20 +92,30 @@ struct Joint{A<:Real} <:Boundary{A}
     end 
 end
 
-# Eine Funktion f(s) -> x,y,ϕ,trans notwendig
+# x,y,phi geben SollPosition an 
 mutable struct Movable{A<:Real} <:Boundary{A}
     x::A
     y::A
     ϕ::A
-    trans::AbstractMatrix{A}
     fx::A
     fy::A
     mz::A
-    function Movable(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
-        new{T}(x,y,ϕ,Diagonal(ones(T,3)),fx,fy,mz)
+    trans::AbstractVector{Int}
+    function Movable(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T,dir) where{T}
+        new{T}(x,y,ϕ,fx,fy,mz,dir)
+    end 
+    function Movable{T}(x,y,ϕ,fx,fy,mz,dir = ones(Int,3)) where{T<:Real} 
+        new{T}(T(x),T(y),T(ϕ),T(fx),T(fy),T(mz),dir)
     end 
 end
-
+function Movable(x,y,ϕ,fx,fy,mz)
+    p = promote(x,y,ϕ,fx,fy,mz)
+    Branch{eltype(p)}(p...)
+end 
+# function Movable(x,y,ϕ,dir,fx,fy,mz,dir) 
+#     p = promote(x,y,ϕ,fx,fy,mz)
+#     Movable{eltype(p)}(p...,,dir)
+# end 
 
 struct CompliantClamp{A} <:Boundary{A}
     x::A
@@ -132,7 +142,9 @@ gettype(::B) where{T,B<:Boundary{T}} = B
 Base.length(::B) where{B<:Boundary} = fieldcount(B)
 Base.lastindex(::B) where{B<:Boundary} = fieldcount(B)
 Base.getindex(b::Boundary,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Clamp)[idx])
+Base.getindex(b::Movable,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Movable)[idx])
 Base.getindex(b::Boundary,idx::Int) = getfield(b,fieldnames(Clamp)[idx])
+Base.getindex(b::Movable,idx::Int) = getfield(b,fieldnames(Movable)[idx])
 Base.iterate(b::B,i::Int = 1) where{B<:Boundary} = i > length(b) ? nothing : (getfield(b,i),i+1)
 Base.IteratorSize(b::T) where{T<:Boundary} = Base.HasLength()
 
@@ -140,7 +152,8 @@ function (b::Type{B})(x::NamedTuple) where{B<:Boundary}
     B(map(k->getfield(x,k),fieldnames(b))...)
 end 
 
-function (b::Type{B})(x::NamedTuple) where{T,B<:Boundary{T}}
+function (b::Type{B})(x::NamedTuple{kwargs}) where{T,kwargs,B<:Boundary{T}}
+    
     B(map(k->getfield(x,k),fieldnames(b))...)
 end 
 
@@ -165,8 +178,16 @@ Base.:abs2(b::T) where{T<:Boundary} = b*b
 Base.:/(a::Real,b::T) where{T<:Boundary} = T(a ./ b...)
 Base.:/(b::T,a::Real)where{T<:Boundary} = T(b ./ a...)
 
-function Base.:+(a::T,b::NamedTuple) where{T<:Boundary} 
-    T(map(x->hasproperty(b,x) ? getfield(a,x) + getfield(b,x) : getfield(a,x),fieldnames(T))...)
+
+@generated function Base.:+(a::B,b::NamedTuple{V,NTuple{N,T2}}) where{T,V,N,T2,B<:Boundary{T}} 
+    fn = fieldnames(B)
+    # println("Fields: ", fn)
+    # println(fn[1] in V)
+    exprs = [:( $(QuoteNode(f)) in $V ? getproperty(a, $(QuoteNode(f))) + $T(getproperty(b, $(QuoteNode(f)))) : getproperty(a, $(QuoteNode(f))) ) for f in fn]
+    return quote
+        $(Expr(:call, :B, exprs...))
+    end
+    # B( map(f -> hasproperty(b,f) ? getproperty(a,f) + getproperty(b,f) : getproperty(a,f), fn)... )
 end
 
 Base.zero(::Type{T}) where{T<:Boundary} = T(zeros(eltype(T),6)...)

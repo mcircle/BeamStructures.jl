@@ -21,7 +21,6 @@ end
 
 function CRC.rrule(::Type{B},x,y,ϕ,fx,fy,mz) where{T<:Real,B<:Boundary{T}}
     function back_boundary(ȳ)
-        # @show "now in rrule back_boundary for $(B)"
         return NoTangent(),ȳ.x,ȳ.y,ȳ.ϕ,ȳ.fx,ȳ.fy,ȳ.mz
     end 
     return B(x,y,ϕ,fx,fy,mz),back_boundary
@@ -29,21 +28,18 @@ end
 
 function CRC.rrule(::typeof(+),b::B,nt::NamedTuple) where{T<:Real,B<:Boundary{T}}
     function back_add(ȳ)
-        # @show "now in rrule add to boundary for $(B)"
-        ∂b = ȳ 
-        ∂nt = NoTangent()#NamedTuple{keys(nt)}(ntuple(i -> getproperty(ȳ, keys(nt)[i]), length(nt)))
-        return NoTangent(), ∂b, ∂nt
+        return NoTangent(), ȳ, ZeroTangent()
     end 
     return b + nt,back_add
 end
 
-function scalepos_back(ȳ,y,beam::Beam{T}) where{T}
+function scalepos_back(ȳ,y,beam::B) where{T,B<:BeamElement{T}}
     dy = ȳ .* [1,beam.l,beam.l]
-    dbeam = Tangent{Beam{T}}(;l = sum(y[2:3] .* ȳ[2:3] ) ,θe = -ȳ[1])
+    dbeam = Tangent{B}(;l = sum(y[2:3] .* ȳ[2:3] ) ,θe = -ȳ[1])
     return NoTangent(),dbeam, dy,NoTangent() 
 end 
 
-function CRC.rrule(::typeof(scalepos),beam::Beam{T},y,side::Val{2}) where{T}
+function CRC.rrule(::typeof(scalepos),beam::B,y,side::Val{2}) where{T,B<:BeamElement{T}}
     sol = scalepos(beam,y,side)
     sc_back(ȳ) = scalepos_back(ȳ,y,beam)
     return sol,sc_back
@@ -74,20 +70,17 @@ end
 
 function CRC.rrule(::typeof(reduceposat),node::Bo,beams,y,beamnbrs) where{T,Bo<:Boundary{T}} 
     sol = reduceposat(node,beams,y,beamnbrs)
-    function reduceposat_back(ȳ)
+    
+    function reduceposat_back(ȳ,∂beams = zero_tangent(beams))
         rȳ = reshape(ȳ,3,:)
         
-        ∂beams= Tangent{typeof(beams)}(;ntuple(x->keys(beams)[x]=>ZeroTangent(),length(beams))...)
+        # ∂beams= Tangent{typeof(beams)}(;ntuple(x->keys(beams)[x]=>ZeroTangent(),length(beams))...)
         ∂y = zero(y)
         dnode = Tangent{Bo}(;x = 0,y = 0,ϕ = 0)
         for (n,b) in enumerate(beamnbrs[1])
-            # _, spback = CRC.rrule(scalepos,beams[b],y[2:4,2,b],Val(2))
-            
             _,dbeam,dy,_ = scalepos_back(rȳ[:,n],y[2:4,2,b],beams[b])     
-            
             ∂beams -= Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
             ∂y[2:4,2,b] .-= dy
-            # dnode += Tangent{Bo}(;x = beams[b].l * rȳ[2,n],y = beams[b].l *  rȳ[3,n],ϕ = rȳ[1,n])
             dnode += Tangent{Bo}(;x = rȳ[2,n],y =  rȳ[3,n],ϕ = rȳ[1,n])
         end
         return NoTangent(),dnode,∂beams,∂y,NoTangent()
@@ -97,6 +90,7 @@ end
 
 function CRC.rrule(::typeof(reduceposat),node::Bo,beams,y::AbstractArray{T},facs,beamnbrs) where{T,Bo<:Boundary{T}} 
     sol = reduceposat(node,beams,y,facs,beamnbrs)
+    
     function reduceposat_back(ȳ)
         
         rȳ = reshape(ȳ,3,:)
@@ -123,30 +117,29 @@ function CRC.rrule(::typeof(reduceposat),node::Bo,beams,y::AbstractArray{T},facs
     return sol, reduceposat_back
 end 
 
-function pullback_normfactor_m(ȳ,b::Beam{T}) where{T}
+function pullback_normfactor_m(ȳ,b::B,nom) where{T,B<:BeamElement{T}}
     
-    nom = 12/(b.E * (b.w) * (b.h)^3)
-    ∂b = Tangent{Beam{T}}(;
+    ∂b = Tangent{B}(;
         l = ȳ  * nom ,
         h = (-3 * b.l * ȳ * nom / b.h) ,
-        w = -b.l * ȳ * nom / b.w  ,
-        E =  -b.l * ȳ * nom / b.E
+        w = -b.l * ȳ * nom / b.w ,
+        E = -b.l * ȳ * nom / b.E
     )
     return (NoTangent(), ∂b)
 end
 
-function CRC.rrule(::typeof(normfactor_m), b::Beam{T}) where{T}
-    y = normfactor_m(b)
-    pullback_norm_m(ȳ) = pullback_normfactor_m(ȳ,b)  
+function CRC.rrule(::typeof(normfactor_m), b::B) where{T,B<:BeamElement{T}}
+    nf = normfactor(b)
+    pullback_norm_m(ȳ) = pullback_normfactor_m(ȳ,b,nf)  
     return y, pullback_norm_m
 end
 
-function pullback_normfactor_f(ȳ,b::Beam{T}) where{T}
-    ∂m = b.l * ȳ #/ (1+exp(-b.l))
+function pullback_normfactor_f(ȳ,b::B) where{T,B<:BeamElement{T}}
+    ∂m = b.l * ȳ 
     fm, pb_m = CRC.rrule(normfactor_m, b)
     _, ∂b_m = pb_m(∂m)
     
-    ∂b = Tangent{Beam{T}}(;
+    ∂b = Tangent{B}(;
         l = fm * ȳ + ∂b_m.l,
         h =  ∂b_m.h ,
         w =  ∂b_m.w ,
@@ -155,43 +148,70 @@ function pullback_normfactor_f(ȳ,b::Beam{T}) where{T}
     return (NoTangent(), ∂b)
 end
 
-function CRC.rrule(::typeof(normfactor_f), b::Beam{T}) where{T}
-    y = normfactor_f(b)
+function CRC.rrule(::typeof(normfactor_f), b::BeamElement{T}) where{T}
+    y = normfactor(b)
     pullback_norm_f(ȳ) = pullback_normfactor_f(ȳ,b)
     return y, pullback_norm_f
 end
 
-function pullback_normfactor(ȳ,b::Beam{T}) where{T}
-    _,∂b_m = pullback_normfactor_m(ȳ[1],b)
-    _,∂b_f1 = pullback_normfactor_f(ȳ[2],b)
-    _,∂b_f2 = pullback_normfactor_f(ȳ[3],b)
-    ∂beam = ∂b_m + ∂b_f1 + ∂b_f2
+function pullback_normfactor(ȳ,b::BeamElement{T},nom) where{T}
+    all(ȳ .== 0) && return (NoTangent(),ZeroTangent())
+
+    # Ableitung von m nach b-Parametern
+    ∂m_l = nom
+    ∂m_h = -3 * b.l * nom / b.h
+    ∂m_w = -b.l * nom / b.w
+    ∂m_E = -b.l * nom / b.E
+    
+    # Ableitung von f = b.l * m nach b-Parametern
+    ∂f_l = nom + b.l * ∂m_l
+    ∂f_h = b.l * ∂m_h
+    ∂f_w = b.l * ∂m_w
+    ∂f_E = b.l * ∂m_E
+    
+    # Zusammenführen (ȳ = [ȳ_m, ȳ_f1, ȳ_f2])
+    ∂beam = Tangent{typeof(b)}(;
+        l = ȳ[1] * ∂m_l + ȳ[2] * ∂f_l + ȳ[3] * ∂f_l,
+        h = ȳ[1] * ∂m_h + ȳ[2] * ∂f_h + ȳ[3] * ∂f_h,
+        w = ȳ[1] * ∂m_w + ȳ[2] * ∂f_w + ȳ[3] * ∂f_w,
+        E = ȳ[1] * ∂m_E + ȳ[2] * ∂f_E + ȳ[3] * ∂f_E,
+    )
     return (NoTangent(), ∂beam)
 end
 
-function CRC.rrule(::typeof(normvector), b::Beam{T}) where{T}
-    y = normvector(b)
-    pullback_norm(ȳ) = pullback_normfactor(ȳ,b)
+function pullback_normfactor(ȳ,b::BeamElement{T}) where{T}
+    nom = normfactor(b)
+    return pullback_normfactor(ȳ,b,nom)
+end
+
+function CRC.rrule(::typeof(normvector), b::BeamElement{T}) where{T}
+    y = normfactor(b)
+    pullback_norm(ȳ) = pullback_normfactor(ȳ,b,y)
     return y, pullback_norm
 end
 
-function pullback_scaleforce(ȳ,y,nv,b,::Val{false})
-    ∂y = ȳ ./ nv
-    return (NoTangent(),ZeroTangent(),-∂y)
+function pullback_scaleforce(ȳ,y,b,::Val{false})
+    m = normfactor_m(b)
+    f = b.l * m
+    ∂y = @SVector [ȳ[1] / m, ȳ[2] / f,ȳ[3] / f]
+    return (NoTangent(),ZeroTangent(),∂y)
 end
 
-function pullback_scaleforce(ȳ,y,nv,b,::Val{true})
-    ∂y = ȳ ./ nv
-    ∂nv = - ∂y .* y ./ nv 
-    _, ∂beam = pullback_normfactor(∂nv,b)
+function pullback_scaleforce(ȳ,y,b,::Val{true})
+
+    m = normfactor_m(b)
+    f = b.l * m
+    ∂y = @SVector [-ȳ[1] / m,-ȳ[2] / f,-ȳ[3] / f]
+    ∂nv = @SVector [-ȳ[1] * y[1] / m^2, -ȳ[2] * y[2] / f^2, -ȳ[3] * y[3] / f^2]
+    ∂beam = pullback_normfactor(∂nv,b,m)[2]
     return (NoTangent(),∂beam,∂y)
 end 
 
-function CRC.rrule(::typeof(scaleforce),b::Beam,y)
+function CRC.rrule(::typeof(scaleforce),b::B,y) where{T,B<:BeamElement{T}}
     nv , pb_nv = CRC.rrule(normvector, b)
-    # nv = normvector(b)
+
     result =  y ./ nv
-    # pullback_scaleforce(ȳ) = pullback_scaleforce(ȳ,y,nv,b,Val(true))
+    
     function pullback(ȳ)
         ∂y = ȳ ./ nv
         ∂nv = - ∂y .* y ./ nv 
@@ -202,24 +222,24 @@ function CRC.rrule(::typeof(scaleforce),b::Beam,y)
     return result, pullback
 end
 
+vecOrnum(x::AbstractVector,::Val{N}) where{N} = x
+vecOrnum(x::AbstractVector,::Val{1}) = only(x)
+vecOrnum(x::AbstractVector) = vecOrnum(x,Val(length(x)))
 
-
-function pullback_init_beam(ȳ,node::No,beam::Beam{BT},pars) where{BT,No<:Boundary{T} where{T}}
-    @inbounds mb,θb,xb,yb,fxb,fyb,κb = ȳ
+function pullback_init_beam(ȳ,node::No,beam::B,pars) where{BT,B<:BeamElement{BT},No<:Boundary{T} where{T}}
+    @inbounds mb,θb,xb,yb,fxb,fyb,κb... = ȳ
     @inbounds m,fx,fy = pars 
-    l,κ = beam.l,beam.κ0
-    x,y = node.x,node.y
-    _,∂beam = pullback_normfactor([m*mb, fx*fxb,fy*fyb] ,beam)
-    ∂l = -x/l^2 * xb - y/l^2 * yb + κ * κb
-    ∂beam += Tangent{Beam{BT}}(l = ∂l, κ0 = l*κb,θs = θb)
 
-    dx = xb/l
-    dy = yb/l
-    ∂node = Tangent{No}(;x = dx,y=dy,ϕ = θb)
-    ∂pars =  [mb,fxb,fyb] .* normvector(beam)
-    # if isa(node,Branch)
-    #     @show ∂pars
-    # end 
+    normf = normfactor(beam)
+    _,∂beam = pullback_normfactor([m*mb, fx*fxb,fy*fyb],beam,normf)
+
+    ∂beam += Tangent{B}(l = -node.x/beam.l^2 * xb - node.y/beam.l^2 * yb + only(beam.κ0' * κb),
+                       κ0 = vecOrnum(beam.l * κb),
+                       θs = θb)
+
+    ∂node = Tangent{No}(;x = xb/beam.l,y=yb/beam.l,ϕ = θb)
+    ∂pars =  @SVector [mb * normf * beam.l,fxb * normf * beam.l^2,fyb * normf * beam.l^2]
+    
     return NoTangent(),∂node,∂beam,∂pars
 end 
 
@@ -247,7 +267,7 @@ function pullback_init_beam(ȳ,node::Joint{T},beam::Beam{BT},pars) where{T,BT}
     return NoTangent(),∂node,∂beam,∂pars
 end
 
-function CRC.rrule(::typeof(initialize_beam),node::No,beam::Beam{BT},pars::AbstractVector) where{BT,No<:Boundary}
+function CRC.rrule(::typeof(initialize_beam),node::No,beam::BeamElement{BT},pars::AbstractVector) where{BT,No<:Boundary}
     x,y,θ0, = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0
     m,fx,fy = pars .* normvector(beam) #am Balkenelement
@@ -282,27 +302,32 @@ function CRC.rrule(::typeof(initialize_beam),beams::NamedTuple,nodes::NamedTuple
     result,init_u0_back
 end 
 
+makebeamtangent(num::Int,B::Tangent{BE}) where{BT,BE<:BeamElement{BT}} = Tangent{typeof(B)}(;Symbol(:Beam_,num) => B)
+makebeamtangent(num::Int,::ZeroTangent) = ZeroTangent()
+
 function CRC.rrule(::typeof(reduceforceat),node::No,beams,y,idxs) where{No}
     
     sol = reduceforceat(node,beams,y,idxs)
-    function force_bound_back(ȳ)
-        # @show No,idxs
+    function force_bound_back(ȳ,∂beams::Tangent{BT} = zero_tangent(beams)) where{BT}
+
         y_idxs = getforceindices(idxs)
-        ∂y = zero(y)
+        ∂y = CRC.zero_tangent(y)
         y_ = @view y[y_idxs]
         ∂y_ = @view ∂y[y_idxs] 
-        ∂beams = Tangent{typeof(beams)}(;ntuple(x->keys(beams)[x]=>ZeroTangent(),length(beams))...)
-        for (b,yb,dyb) in zip(vcat(idxs...),eachcol(y_),eachcol(∂y_))
-            
-            nv = normvector(beams[b])
-            _,dbeam,dy = pullback_scaleforce(ȳ,yb,nv,beams[b],Val(b in idxs[1]))
-
-            ∂beams += Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
-            dyb .+= dy 
-            
+        n = 1 
+        for b in idxs[1] 
+            _,_,dy = pullback_scaleforce(ȳ,y_[:,n],beams[b],Val(false))
+            ∂y_[:,n] .+= dy
+            n += 1
+        end
+        for b in idxs[2]
+            _,dbeam,dy = pullback_scaleforce(ȳ,y_[:,n],beams[b],Val(true))
+            ∂beams += Tangent{BT}(;Symbol(:Beam_,b) => dbeam)
+            ∂y_[:,n] .+= dy 
+            n += 1 
         end 
 
-        ∂node = CRC.zero_tangent(No) # Tangent{No}(;fx = ȳ[2],fy = ȳ[3],mz = ȳ[1]) #CRC.zero_tangent(No) #
+        ∂node = ZeroTangent() # CRC.zero_tangent(No)
         return NoTangent(),∂node,∂beams,∂y,NoTangent()
     end 
     return sol,force_bound_back
@@ -322,26 +347,10 @@ function CRC.rrule(::typeof(reduceforceat),node::No,beams,y::AbstractArray{T,3},
         for (b,yb,dyb) in zip(vcat(idxs...),eachcol(y_),eachcol(∂y_))
             # scale = normvector(beams[b])
             nv = normvector(beams[b])
-            _,dbeam,dy = pullback_scaleforce(factors[b].* ȳ,yb,nv,beams[b],Val(b in idxs[1]))
+            _,dbeam,dy = pullback_scaleforce(factors[b].* ȳ,yb,nv,beams[b],Val(b in idxs[2]))
 
             ∂beams += Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
             dyb .+= dy 
-
-            # f, rr_norm = CRC.rrule(scaleforce,beams[b],yb)
-            # if b in idxs[2]
-            #     _,dbeam,dyrr_ = rr_norm(-factors[b].*ȳ) 
-            #     ∂fac[b] = sum(-f .* ȳ) 
-                
-            #     # if isa(node,Branch)
-            #     #     @show b, dyrr_
-            #     # end
-            # else
-            #     _,dbeam,dyrr_ = rr_norm(factors[b] .* ȳ)
-            #     ∂fac[b] = sum(f .* ȳ) 
-                
-            # end 
-            # ∂beams += Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
-            # dyb .+= dyrr_
         end 
         
         ∂node = CRC.zero_tangent(No)#(;fx = ȳ[2],fy = ȳ[3],mz = ȳ[1])
@@ -382,79 +391,63 @@ end
 
 @non_differentiable reduceforceat(n::Clamp,beams,y,idxs) 
 
-function getnodeswithbeams(adj::AbstractMatrix,nodes::NamedTuple)
-    nodeswithbeams = Vector{Int}()
-    for ap in axes(adj,1)
-        if isa(nodes[ap],Branch) 
-            push!(nodeswithbeams,ap)
-        elseif isa(nodes[ap],Clamp) && ap > 1 && sum(adj[1:ap,ap]) > 0 
-            push!(nodeswithbeams,ap)
-        end
-    end 
-    return nodeswithbeams
-end   
-
 function CRC.rrule(::typeof(residuals!),residuals,str::Structure,y,bn)
     ind = 1
     adj = str.AdjMat
-    # idcs = LinearIndices(residuals)
-    nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
-    branches = count(x->isa(x,Branch),bn.Nodes)
-    residuals_forces = @view residuals[:,1:branches]
-    residuals_positions = @view residuals[:,branches+1:end]
 
+    nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
+    branches = filter(x->!isa(bn.Nodes[x],Clamp),eachindex(bn.Nodes))
+    positional_nodes = filter(x->any(adj[1:x,x].> 0),axes(adj,1))
+    residuals_forces = @view residuals[:,1:length(branches)]
+    residuals_positions = @view residuals[:,length(branches)+1:end]
     forces = 1
     positions = 1
-    resposdict = Dict{Int,AbstractRange{Int}}()
-    resforcedict = Dict{Int,Int}()
-    rrposdict = Dict{Int,Function}()
-    rrforcedict = Dict{Int,Function}()
+
+    rrforce = Vector{Function}(undef,length(branches))
+    rrpos = Vector{Pair{AbstractRange{Int},Function}}()
+
     for n in getnodeswithbeams(adj,bn.Nodes)
         node = bn.Nodes[n]
         beams = findbeamsatnode(node,n,nodes)
         res, pullback_reduceforceat = rrule(reduceforceat,node,bn.Beams,y,beams)
         if !isempty(res)
             residuals_forces[:,forces] .= res
-            resforcedict[n] = forces
-            rrforcedict[n] = pullback_reduceforceat
+            rrforce[forces] = pullback_reduceforceat
             forces += 1
         end 
         res, pullback_reduceposat = rrule(reduceposat,node,bn.Beams,y,beams)
         if !isempty(res)
+            
             idxs = positions:positions + size(res,2) - 1
-            resposdict[n] = idxs
-            rrposdict[n] = pullback_reduceposat
             residuals_positions[:,idxs] .= res
+            push!(rrpos,idxs =>pullback_reduceposat)
             positions = idxs[end] + 1
         end  
     end
     function residuals!_back(ȳt)
         ȳ = CRC.unthunk(ȳt)
         ∂res = ZeroTangent()
-        ∂y = zero(y) 
-        ȳ_forces = @view ȳ[:,1:branches]
-        ȳ_positions = @view ȳ[:,branches+1:end]
+        ∂y = CRC.zero_tangent(y) 
+        ȳ_forces = @view ȳ[:,1:length(branches)]
+        ȳ_positions = @view ȳ[:,length(branches)+1:end]
 
-        ∂beams = Tangent{typeof(bn.Beams)}(;ntuple(x->keys(bn.Beams)[x] =>ZeroTangent(),length(bn.Beams))...)        
-        ∂nodes = Tangent{typeof(bn.Nodes)}(;ntuple(x->keys(bn.Nodes)[x] =>ZeroTangent(),length(bn.Nodes))...)
-        for (ind,pos) in resforcedict
-            _,dnode,dbeams,dy,_ =rrforcedict[ind](ȳ_forces[:,pos])
+        ∂beams = CRC.zero_tangent(bn.Beams)       
+        ∂nodes = CRC.zero_tangent(bn.Nodes)
+        for (pos,rrforce_rule) in enumerate(rrforce)
+            _,dnode,_,dy,_ = rrforce_rule(ȳ_forces[:,pos],∂beams)
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
-            ∂beams += dbeams
-            # @show "F",pos,ind, dbeams
             ∂y .+= dy 
+            
         end
+        
+        for (ind,(pos,rrpos_rule)) in enumerate(rrpos)    
+            _,dnode,_,dy,_ = rrpos_rule(ȳ_positions[:,pos],∂beams)
+            ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,positional_nodes[ind]) => dnode)
 
-        for (ind,pos) in resposdict
-            _,dnode,dbeams,dy,_ = rrposdict[ind](ȳ_positions[:,pos])
-            ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
-            ∂beams += dbeams
-            # @show "P", pos, ind, dbeams
             ∂y .+= dy
         end 
         ∂bn = Tangent{typeof(bn)}(;Beams = ∂beams,Nodes = ∂nodes)
-        # @show ∂beams[:Beam_6]
-        # ∂y
+
         return NoTangent(),∂res,NoTangent(),∂y,∂bn
     end 
 
@@ -471,10 +464,9 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
 
     ind = 1
     idcs = getindices(size(adj_,1))
-
     adj = ifelse.(adj_ .> 1,one(T),adj_ )
     adj = ifelse.(adj .< 0, zero(T),adj_ )
-    # start = 1
+
     branches = count(x->isa(x,Branch),bn.Nodes)
     residuals_forces = @view residuals[:,1:branches]
     residuals_positions = @view residuals[:,branches+1:end]
@@ -497,6 +489,7 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
             forces += 1
         end 
         res, pullback_reduceposat = rrule(reduceposat,node,bn.Beams,y,adj[idcs],beams)
+    
         if !isempty(res)
             idxs = positions:positions + size(res,2) - 1
             resposdict[n] = idxs
@@ -521,7 +514,7 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
             _,dnode,dbeams,dy,df =rrforcedict[ind](ȳ_forces[:,pos])
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams += dbeams
-            # @show ind, pos, dbeams
+
             ∂y .+= dy 
             # ∂fac[idcs] .+= df
         end
@@ -531,7 +524,7 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
             ∂nodes += Tangent{typeof(bn.Nodes)}(;Symbol(:Node_,ind) => dnode)
             ∂beams +=  dbeams
             ∂y .+= dy
-            # @show ind, pos, dbeams
+
             # ∂fac[idcs] .+= df
         end 
         # @show ∂fac
@@ -595,12 +588,12 @@ function CRC.rrule(::typeof(addpositions),nodes,xpos)
 end
 
 function CRC.rrule(::typeof(changestartnodes),nodes,x)
-    anz = length(nodes) - count(x->isa(x,Clamp),values(nodes))
+    anz = count(x->!isa(x,Clamp),values(nodes))
     xpos = @view x[:,1:anz]
     xforces = @view x[:,anz+1:end]
     nodes_,back = CRC.rrule(addpositions,nodes,xpos)
     function changeback(ȳ)
-        # @show ȳ
+        
         ∂x = zero(x)
         ∂x[:,1+anz:end] .+= ȳ[1]
         _,∂nodes,∂xpos = back(ȳ[2])
@@ -610,23 +603,37 @@ function CRC.rrule(::typeof(changestartnodes),nodes,x)
     return (xforces,nodes_),changeback
 end 
 
-function output_func(u,∂sol,beams,nodes,nodepos,x,i)
+function output_func(u,beams,nodes,nodepos,x,i)
     x_idxs = nodepos[i]
     _,dnode,dbeam,∂xforces = pullback_init_beam(u(0),nodes[x_idxs],beams[i],x[:,i])
-    # @show i,dbeam
-    if isa(nodes[x_idxs],Branch)
-        ∂xforces .+= ∂sol[[1,5,6],1,i] .* normvector(beams[i])
-    end
     ∂beams = Tangent{typeof(beams)}(;Symbol(:Beam_,i) => dbeam)
     ∂nodes = Tangent{typeof(nodes)}(;Symbol(:Node_,x_idxs) => dnode)
     (∂beams,∂nodes,∂xforces),false
 end 
 
+function startgrad(∂x,beam::BeamElement,::Clamp)
+    ZeroTangent()
+end 
+
+function startgrad(∂x,beam::BeamElement,node::Branch)
+    l = beam.l
+    dx = ∂x[1] / l
+    dy = ∂x[2] / l
+    dϕ = ∂x[3]
+    return [dx,dy,dϕ]
+end
+
+function add_startgrads!(∂x,∂sol,beams,nodes,adj)
+    
+    for (i,node) in enumerate(values(nodes))
+        beams_nr = findbeamsatnode(node,i,idcs)
+        ∂x[:,i] += startgrad(∂partial[:,i],beams,node)
+    end
+end
+
 function reduction_func!(u,data,I)
     
-    # ∂pars,∂Beams,∂Nodes = u
     for ((∂beam,∂node,∂xforces),i) in zip(data,I)
-        # @show i, ∂beam
         u[1][:,i] .+= ∂xforces
         u[3] += ∂node
         u[2] += ∂beam
@@ -638,20 +645,57 @@ function totangent(::T,x) where{BT,T<:CRC.StructuralTangent{BT}}
     T((getproperty(x, fname) for fname in fieldnames(x))...)
 end
 
+@generated function generate_tangent(::Val{N}, ::Type{BN}, dbeams) where {N,Nt,Bt<:BeamElement,BN<:NamedTuple{Nt,NTuple{N,Bt}}}
+    fields = Expr(:tuple)
+    for i = 1:N
+        push!(fields.args, :(Nt[$i] => CRC.StructuralTangent{$Bt}(CRC.backing(dbeams[$i]))))
+    end
+    quote
+        Tangent{$BN}(;$fields...)  
+    end
+end
+
+@generated function generate_tangent(::Val{N}, ::Type{NT}, dnodes) where {N,T1,T2,NT<:NamedTuple{T1,T2}}
+    # @show T1,T2
+    TB = getfield(T2,:3)
+    fields = Expr(:tuple)
+    for i = 1:N
+        push!(fields.args, :(T1[$i] => CRC.StructuralTangent{$TB[$i]}(CRC.backing(dnodes[$i]))))
+    end
+    quote
+        Tangent{$NT}(;$fields...)  
+    end
+end
+
+
 function u_init(x, bn,dbeams,dnodes)
-    [zero(x),
-    Tangent{typeof(bn.Beams)}(;ntuple(x->keys(bn.Beams)[x] =>CRC.StructuralTangent{typeof(bn.Beams[x])}(CRC.backing(dbeams[x])),length(bn.Beams))...),
-    Tangent{typeof(bn.Nodes)}(;ntuple(x->keys(bn.Nodes)[x] =>CRC.StructuralTangent{typeof(bn.Nodes[x])}(CRC.backing(dnodes[x])),length(bn.Nodes))...)]
+    dx = similar(x)
+    for i in axes(x,2)
+        dx[:,i] .= x[:,i] .* normvector(bn.Beams[i])
+    end    
+    [dx,
+    generate_tangent(Val(length(bn.Beams)), typeof(bn.Beams), dbeams),
+    generate_tangent(Val(length(bn.Nodes)), typeof(bn.Nodes), dnodes)
+    ]
+end 
+
+function initialize_u0_vjp(x::AbstractVector{T},::Beam) where{T}
+    x
+end 
+function initialize_u0_vjp(x::AbstractVector{T},beam::CurvedBeam{T}) where{T}
+    u0 = zeros(T,length(x) + length(beam.κ0))
+    u0[1:length(x)] .= x
+    u0[length(x)+1:end] .= beam.κ0
+    u0
 end 
 
 function CRC.rrule(str::Structure,x::AbstractArray{T,N},bn::NamedTuple) where{T,N}
-    nodepos = getstartnodes(str.AdjMat)
-
+    nodepos = getstartnodes(str)
+    # @show nodepos
     (xforces,nodes_),change_pullback = CRC.rrule(changestartnodes,bn.Nodes,x)
-    
     function prob_func(prob,i,repeat) 
-        u0 = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i) 
-        remake(prob;u0 = u0)
+        u0,p = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i) 
+        remake(prob;u0 = u0,p = p)
     end 
 
     ensprob  =  EnsembleProblem(prob;prob_func = prob_func)
@@ -662,29 +706,34 @@ function CRC.rrule(str::Structure,x::AbstractArray{T,N},bn::NamedTuple) where{T,
                 trajectories = length(bn.Beams)
                 )
     bn_ = (;Beams = bn.Beams,Nodes = nodes_)
+
     function back_ode(ȳ)
         @inbounds ∂sol,∂bn = ȳ
         ∂Beams = ∂bn.Beams   
         ∂Nodes = ∂bn.Nodes
-
+        # tet = CRC.unthunk(∂sol)
+        # @show tet[2:4,1,1] ./[1,bn.Beams[1].l,bn.Beams[1].l]
+        # @show tet[2:4,1,2] ./[1,bn.Beams[2].l,bn.Beams[2].l]
+        # @show tet[2:4,1,3] ./[1,bn.Beams[3].l,bn.Beams[3].l]
+        # @show tet[2:4,1,4]./[1,bn.Beams[4].l,bn.Beams[4].l]
+    
         function prob_func(prob,i,repeat) 
-            u0 = @view ∂sol[:,2,i]
+            u0 = initialize_u0_vjp(∂sol[:,2,i],bn.Beams[i])
             remake(prob;u0 = u0,p = solforward[i],tspan = (one(T),zero(T)))
         end
         ensprob  =  EnsembleProblem(vjpprob;prob_func = prob_func,
-                                    output_func = (sol,i) -> output_func(sol,∂sol,bn.Beams,nodes_,nodepos,xforces,i),
+                                    output_func = (sol,i) -> output_func(sol,bn.Beams,nodes_,nodepos,xforces,i),
                                     reduction = (u,data,I) -> reduction_func!(u,data,I),
-                                    u_init = u_init(xforces,bn,∂Beams,∂Nodes))
+                                    u_init = u_init(∂sol[[1,5,6],1,:],bn,∂Beams,∂Nodes))
         solp = solve(ensprob,str.Solver,
                     EnsembleThreads(),
                     reltol = 1e-6,abstol = 1e-6,
                     trajectories = length(bn.Beams)
                     )
         ∂xforces,dBeams,dNodes = solp
-        # @show ∂xforces
-        # @show dBeams
+
         _,∂nodes_change, ∂x = change_pullback((∂xforces,dNodes))
-        # @show ∂x
+        # add_startgrads!(∂x,∂sol[[3,4,2],1,:],bn.Beams,bn.Nodes,)
         ∂bn = Tangent{typeof(bn)}(;Beams = dBeams,Nodes = dNodes)
         return NoTangent(),∂x,∂bn,ZeroTangent(),NoTangent()
     end
@@ -714,8 +763,8 @@ function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},bn::NamedTuple,adj)
     
     (xforces,nodes_),change_pullback = CRC.rrule(changestartnodes,bn.Nodes,x)
     function prob_func(prob,i,repeat) 
-        u0 = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
-        remake(prob;u0 = u0)
+        u0,p = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
+        remake(prob;u0 = u0,p = p)
     end 
 
     ensprob  =  EnsembleProblem(prob;prob_func = prob_func)

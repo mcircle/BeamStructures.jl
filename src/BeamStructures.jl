@@ -9,6 +9,8 @@ module BeamStructures
     using SciMLBase
     using Setfield
     using Random
+    using Base
+    using StaticArrays
     using Optimisers
     using ChainRulesCore: rrule,Tangent, NoTangent, ZeroTangent, @thunk ,@non_differentiable,InplaceableThunk
     using InteractiveUtils
@@ -23,8 +25,9 @@ module BeamStructures
     # include("Bibliography.jl")
     include("Optimizations.jl")
     include("ChainRulesExt.jl")
+    include("IteratorExt.jl")
     
-    export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand
+    export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand,CurvedBeam
 
     export learningrate,changenode
 

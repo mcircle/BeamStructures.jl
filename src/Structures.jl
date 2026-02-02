@@ -29,7 +29,17 @@ function initialize_beam(node::Boundary,beam::Beam,parameters::AbstractVector{T}
     m *= normfactor_m(beam) #am Balkenelement
     fx *= normfactor_f(beam) #am Balkenelement
     fy *= normfactor_f(beam) #am Balkenelement
-    return [m,θ0 + θs,x./l,y./l,fx,fy,κ*l]
+    return [m,θ0 + θs,x./l,y./l,fx,fy,κ*l],SciMLBase.NullParameters()
+end 
+
+function initialize_beam(node::Boundary,beam::CurvedBeam,parameters::AbstractVector{T}) where {T}
+    x,y,θ0, = node.x,node.y,node.ϕ
+    l,θs = beam.l,beam.θs
+    m,fx,fy = parameters
+    m *= normfactor_m(beam) #am Balkenelement
+    fx *= normfactor_f(beam) #am Balkenelement
+    fy *= normfactor_f(beam) #am Balkenelement
+    return [m,θ0 + θs,x./l,y./l,fx,fy],beam.κ0
 end 
 
 function initialize_beam(node::CompliantClamp,beam::Beam,parameters::AbstractVector{T}) where {T}
@@ -38,7 +48,7 @@ function initialize_beam(node::CompliantClamp,beam::Beam,parameters::AbstractVec
     m = node.cz * (beam.θs .- parameters[1]) .* normfactor_m(beam)
     fx = parameters[2] * normfactor_f(beam) #am Balkenelement
     fy = parameters[2] * normfactor_f(beam) #am Balkenelement
-    return [m,θ0 + beam.θs + parameters[1],x./l,y./l,fx,fy,κ*l]
+    return [m,θ0 + beam.θs + parameters[1],x./l,y./l,fx,fy,κ*l],SciMLBase.NullParameters()
 end
 
 function initialize_beam(node::Clamp,beam::Beam,parameters::AbstractVector{T}) where {T}
@@ -48,14 +58,24 @@ function initialize_beam(node::Clamp,beam::Beam,parameters::AbstractVector{T}) w
     m *=  normfactor_m(beam)
     fx *= normfactor_f(beam)
     fy *= normfactor_f(beam) #am Balkenelement
-    return [m,θ0 + θs,x/l,y/l,fx,fy,κ*l]
+    return [m,θ0 + θs,x/l,y/l,fx,fy,κ*l],SciMLBase.NullParameters()
+end 
+
+function initialize_beam(node::Clamp,beam::CurvedBeam,parameters::AbstractVector{T}) where {T}
+    x,y,θ0, = node.x,node.y,node.ϕ
+    l,θs = beam.l,beam.θs
+    m,fx,fy = parameters
+    m *= normfactor_m(beam) #am Balkenelement
+    fx *= normfactor_f(beam) #am Balkenelement
+    fy *= normfactor_f(beam) #am Balkenelement
+    return [m,θ0 + θs,x./l,y./l,fx,fy],beam.κ0 .*l
 end 
 
 function initialize_beam(node::Free,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0 = node.x,node.y,node.ϕ
     l,θs,κ = beam.l,beam.θs,beam.κ0     
     Δθ,Δx,Δy = parameters  #am Balkenelement
-    return [zero(T),θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,zero(T),zero(T),κ*l]
+    return [zero(T),θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,zero(T),zero(T),κ*l],SciMLBase.NullParameters()
 end 
 
 function initialize_beam(node::ExtForces,beam::Beam,parameters::AbstractVector{T}) where {T}
@@ -65,7 +85,7 @@ function initialize_beam(node::ExtForces,beam::Beam,parameters::AbstractVector{T
     m = node.mz .* normfactor_m(beam) #am Balkenelement
     fx = node.fx .* normfactor_f(beam) #am Balkenelement
     fy = node.fy .* normfactor_f(beam) #am Balkenelement
-    return [m,θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,fx,fy,κ*l]
+    return [m,θ0 + θs + Δθ,(x + Δx)./l,(y + Δy)./l,fx,fy,κ*l],SciMLBase.NullParameters()
 end 
 
 function initialize_beam(node::Movable,beam::Beam,parameters::AbstractVector{T}) where {T}
@@ -75,7 +95,7 @@ function initialize_beam(node::Movable,beam::Beam,parameters::AbstractVector{T})
     m = mz .* normfactor_m(beam) #am Balkenelement
     fx = fx .* normfactor_f(beam) #am Balkenelement
     fy = fy .* normfactor_f(beam) #am Balkenelement
-    return [m,θ0 + θs,x./l,y./l,fx,fy,κ*l]
+    return [m,θ0 + θs,x./l,y./l,fx,fy,κ*l],SciMLBase.NullParameters()
 end
 
 function initialize_beam(beams::NamedTuple,nodes::NamedTuple,x,nodepos,i::Int)
@@ -83,17 +103,18 @@ function initialize_beam(beams::NamedTuple,nodes::NamedTuple,x,nodepos,i::Int)
     initialize_beam(nodes[nodepos[i]],beams[i],x[:,i])
 end 
 
-scalepos(beam::Beam,y::AbstractArray,::Val{2})  = [y[1] - beam.θe,y[2].*beam.l,y[3].*beam.l]
-scalepos(beam::Beam,y::AbstractArray,::Val{1})  = [y[1] - beam.θs,y[2].*beam.l,y[3].*beam.l]
+scalepos(beam::BeamElement,y::AbstractArray,::Val{2})  = [y[1] - beam.θe,y[2].*beam.l,y[3].*beam.l]
+scalepos(beam::BeamElement,y::AbstractArray,::Val{1})  = [y[1] - beam.θs,y[2].*beam.l,y[3].*beam.l]
 
 function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,3},beamnbrs) where{T}
-    # @show beams[first(beamnbrs[1])]
-    res = map(x-> [node.ϕ,node.x,node.y] .- scalepos(beams[x],y[2:4,2,x],Val(2)),beamnbrs[1])
+    res = map(x-> [node.ϕ,node.x,node.y] .- scalepos(beams[x],y[2:4,2,x],Val(1)),beamnbrs[1])
+
     if isempty(res)
         return Vector{T}()
     end
     reduce(hcat,res)
 end
+
 dir_vector(node::LinearSlider) = [cos(node.dir),sin(node.dir)]
 function reduceposat(node::LinearSlider,beams::NamedTuple,y::AbstractArray{T,3},beamnbrs) where{T}
     ϕ = node.ϕ
@@ -111,12 +132,14 @@ function reduceposat(node::Joint,beams::NamedTuple,y::AbstractArray{T,3},beamnbr
 end
 
 scaleforce(beam,y) =  y ./normvector(beam)
+
 function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T}
-    
-    solp = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = zeros(T,3))
-    solm = reduce((init,beampos)->init .- scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = solp) 
-    return solm #solp .- 
+    # scale the forces according to the beamdimensions and add them up
+    solp = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = .-node[[6,4,5]])
+    solm = reduce((init,beampos)->init .- scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = solp ) 
+    return solm 
 end 
+
 function dir_matrix(node::LinearSlider{T}) where{T} 
     mat = zeros(T,3,3)
     mat[1] = one(T)
@@ -134,6 +157,7 @@ function reduceforceat(node::Joint{TN},Beams::NamedTuple,y::AbstractArray{T,3},b
     solm = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = zeros(T,3)) 
     return [1,0,0] .* (solp .- solm) 
 end
+
 reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where {T} = Vector{T}()
  
 
@@ -141,7 +165,7 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
     # idcs = LinearIndices(residuals)#CartesianIndices((1:3,1:fld(length(residuals),3))))
     adj = str.AdjMat
     nodes = findall(x->!isapprox(x,0),LowerTriangular(adj))
-    branches = count(x->isa(x,Branch),bn.Nodes)
+    branches = count(x->!isa(x,Clamp),bn.Nodes)
     residuals_forces = @view residuals[:,1:branches]
     residuals_positions = @view residuals[:,branches+1:end]
     forces = 1
@@ -156,7 +180,7 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},bn) where{T}
         end 
         res = reduceposat(node,bn.Beams,y,beams)
         if !isempty(res)
-            idxs = positions:positions + size(res,2) - 1
+            idxs = positions:positions + size(res,2) -1
             residuals_positions[:,idxs] .= res
             positions = idxs[end] + 1
         end  
@@ -175,19 +199,27 @@ function addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb
     Te = promote_type(T,Tb)
     type(BT)(Te.(node[1:end])...) + (;x = pos[1],y = pos[2],ϕ = pos[3])
 end 
+
+function addposition(node::Movable{Tb},pos::AbstractVector{T}) where{T,Tb}  
+    Te = promote_type(T,Tb)
+    pos_ = node.trans .* pos
+    Movable{Te}(Te.(node[1:end-1])...,node.trans) + (;x = pos_[1],y = pos_[2],ϕ = pos_[3])
+end
+
 addposition(node::Clamp,pos) = node
 addposition(node::LinearSlider,pos::AbstractVector{T}) where{T}  = LinearSlider{T}(node[1:3]...,pos[1]) 
 addposition(node::Joint,pos::AbstractVector{T}) where{T}  = Joint{T}(node[1:2]...,pos[1]) 
 addposition(node::Boundary,pos::Nothing)  = node
 
+
 function addpositions(nodes::NamedTuple,xpos::AbstractMatrix)
-    branches = 1:length(nodes) |> filter((x)->isa(values(nodes[x]),Branch))
+    branches = 1:length(nodes) |> filter((x)->!isa(values(nodes[x]),Clamp))
     newnodes = map((node,pos)->keys(nodes)[node] => addposition(nodes[node],pos),branches,eachcol(xpos))
     merge(nodes,newnodes)
 end 
 
 function changestartnodes(nodes,x)
-    anz = length(nodes) - count(x->isa(x,Clamp),values(nodes))
+    anz =  count(x->!isa(x,Clamp),values(nodes))
     xpos = @view x[:,1:anz]
     xforces = @view x[:,anz+1:end]
     nodes_ = addpositions(nodes,xpos)
@@ -200,15 +232,14 @@ function toArray(x::AbstractVectorOfArray,pos = [0,1])
 end
 
 function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{false}) where{T}
-    # @show T
+   
     nodepos = getstartnodes(str)
-    # x_ = reshape(x,3,:)
+    
     xforces,nodes_ = changestartnodes(bn.Nodes,x)
-    # @show typeof(nodes_[1])
+    
     function prob_func(prob,i,repeat) 
-        
-        u0 = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
-        remake(prob;u0 = u0,)
+        u0,p = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
+        remake(prob;u0 = u0,p = p)
     end 
 
     ensprob  =  EnsembleProblem(prob;
@@ -223,7 +254,7 @@ function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{false}) wher
                 trajectories = length(bn.Beams)
                 )
               
-    sol,(;Beams = bn.Beams,Nodes = nodes_)
+    toArray(sol),(;Beams = bn.Beams,Nodes = nodes_)
 end
 
 function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{true}) where{T}
@@ -232,8 +263,8 @@ function (str::Structure)(x::AbstractMatrix{T},bn::NamedTuple,::Val{true}) where
     xforces,nodes_ = changestartnodes(bn.Nodes,x)
     # nodes_ = addpositions(nodes,x) 
     function prob_func(prob,i,repeat) 
-        u0 = initialize_beam(beams,nodes_,xforces,nodepos,i)
-        remake(prob;u0 = u0)
+        u0,p = initialize_beam(beams,nodes_,xforces,nodepos,i)
+        remake(prob;u0 = u0,p = p)
     end 
 
     ensprob  =  EnsembleProblem(prob;prob_func = prob_func)

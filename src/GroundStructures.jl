@@ -19,8 +19,8 @@ function (str::GroundStructure)(x::AbstractMatrix{T},bn::NamedTuple,adj::Abstrac
     xforces,nodes_ = changestartnodes(bn.Nodes,x)
     function prob_func(prob,i,repeat) 
         
-        u0 = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
-        remake(prob;u0 = u0)
+        u0,p = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
+        remake(prob;u0 = u0,p = p)
     end 
 
     ensprob  =  EnsembleProblem(prob;
