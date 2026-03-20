@@ -8,33 +8,7 @@ struct Beam{T<:Real} <:BeamElement{T}
     E::T
     θs::T
     θe::T
-    # function Beam{T}(l,h,w,κ0,E,θs,θe) where{T}
-    #     new{T}(l,h,w,κ0,E,θs,θe)
-    # end 
 end 
-
-using BSplineKit
-
-const KNOTLENGTH = 5
-const ORDER = 4
-BREAKS =range(0f0,1f0,length=KNOTLENGTH)
-order = BSplineOrder(ORDER)
-pos_knots = BSplineKit.SplineInterpolations.make_knots(BREAKS, order, nothing)
-splinebasis = BSplineBasis(order,pos_knots;augment= Val(false))
-
-function getspline(basis,c,t)
-    i,bs = evaluate_all(basis,t)
-    return sum(c[i:-1:i-ORDER+1] .* bs)
-end 
-
-function splineode!(du::AbstractVector,u,p::AbstractVector,t)
-    du .= getspline(splinebasis,p,t)
-end 
-
-splinefunc = ODEFunction{true}(splineode!)
-splineprob = ODEProblem(splinefunc,zero(Float32),(0f0,1f0))
-
-get_θe(θs,κ0) = solve(splineprob,Tsit5(),u0 = [θs], p=κ0,reltol=1e-6,abstol=1e-6).u[end]
 
 struct CurvedBeam{T<:Real} <:BeamElement{T}
     l::T
@@ -45,21 +19,27 @@ struct CurvedBeam{T<:Real} <:BeamElement{T}
     θs::T
     θe::T
     function CurvedBeam{T}(l::T,h::T,w::T,κ0::AbstractVector{T},E::T,θs::T,θe::T) where{T}
+        # p = T.([l,h,w,E,θs,θe])
+        # k0 = T.(κ0)
         new{T}(l,h,w,κ0,E,θs,θe)
     end 
 end
 
-function CurvedBeam(l,h,w,κ0;E = 2.1f5,θs = 0)
-    p = promote(l,h,w,E,θs)
-    θe = get_θe(p[5],κ0)
-    CurvedBeam{eltype(p)}(p[1],p[2],p[3],κ0;E = p[4],θs = p[5],θe = θe)
-end
-function CurvedBeam{T}(l,h,w,κ0;E = 2.1f5,θs = 0) where{T}
+# function CurvedBeam(l,h,w,κ0;E = 2.1f5,θs = 0)
+#     p = promote(l,h,w,E,θs)
+#     θe = get_θe(p[5],κ0)
+#     CurvedBeam{eltype(p)}(p[1],p[2],p[3],κ0,p[4],p[5],θe)
+# end
 
-    p = T.([l,h,w,E,θs])
+function CurvedBeam{T}(l,h,w,κ0;E = 2.1f5,θs = 0,θe = nothing) where{T}
+    if isnothing(θe)
+        θe = get_θe(p[5],k0)
+    else
+        p = T.([l,h,w,E,θs])
+        θe = T(θe)
+    end 
     k0 = T.(κ0)
-    θe = get_θe(p[5],k0)
-    CurvedBeam{T}(p[1],p[2],p[3],k0,p[4],p[5],only(θe))
+    CurvedBeam{T}(p[1],p[2],p[3],k0,p[4],p[5],θe)
 end
 
 relu(x::T,m = zero(T)) where{T} = ifelse(x < m,m,x)
@@ -98,16 +78,39 @@ function change_beam(beam::Beam;kwargs...)
     beam
 end  
 
+gettype(::Beam{T}) where{T} = Beam
+gettype(::CurvedBeam{T}) where{T} = CurvedBeam
+
 Base.length(b::BeamElement) = 7
 Base.lastindex(b::BeamElement) = 7
+
 function Base.getproperty(b::BeamElement,n::Symbol)
     val = getfield(b,n)
 end 
 
+function Base.getindex(b::B, i::Int) where B<:BeamElement
+    N = fieldcount(B)
+    i > N &&  throw(BoundsError(b, i))
+    
+    fields = fieldnames(B)
+    
+    getfield(b, fields[i])
+end
 
-Base.getindex(b::B,idx::Int) where{B<:BeamElement} = getproperty(b,fieldnames(B)[idx])
+function Base.iterate(b::B, i::Int=1) where B<:BeamElement
+    N = fieldcount(B)
+    i> N && return nothing
+    fields = fieldnames(B)
+    return getfield(b, fields[i]), i+1
+end
+
+isacurvedbeam(::CurvedBeam) = true
+isacurvedbeam(::BeamElement) = false
+
+Base.promote_rule(::Type{B}, ::Type{S}) where {B<:BeamElement{T}, S} where T = promote_type(T,S)
+
 Base.getindex(b::B,idx::AbstractVector) where{B<:BeamElement} = map(x->getindex(b,x),idx)
-Base.iterate(b::B,i::Int = 1) where{B<:BeamElement} = i > 7 ? nothing : (getfield(b,i),i+1)
+Base.getindex(b::B,idx::Colon) where{B<:BeamElement} = map(x->getindex(b,x),1:fieldcount(B))
 Base.IteratorSize(b::B) where{B<:BeamElement} = Base.HasLength()
 Base.real(b::B) where{B<:BeamElement} = b
 Statistics.realXcY(a::B,b::B) where{B<:BeamElement} = a*b
@@ -221,9 +224,9 @@ function Optimisers.apply!(o::WeightDecay, state, x::Beam{T}, dx) where{T}
     return state, Beam{T}(dx′...)
 end
 
-Optimisers.init(o::OptimiserChain, x::Beam) = map(opt -> Optimisers.init(opt, x), o.opts)
+Optimisers.init(o::OptimiserChain, x::BeamElement) = map(opt -> Optimisers.init(opt, x), o.opts)
 
-Optimisers.init(o::Optimisers.ClipNorm, x::Beam) = nothing
+Optimisers.init(o::Optimisers.ClipNorm, x::BeamElement) = nothing
 
 function Optimisers.apply!(o::Optimisers.ClipNorm, state, x::Beam{T}, dx) where T
   nrm = norm(dx, o.p)
@@ -257,18 +260,21 @@ end
 
 
 function ode!(dU,u::AbstractVector{T},p::SciMLBase.NullParameters,s) where{T}
-    @inbounds m,θ,x,y,fx,fy,κ = u
-    dU[1] = fx*sin(θ)-fy*cos(θ)   #dM
-    dU[2] = m + κ               #dΘ
-    dU[3] = cos(θ) #* (1 + T[5]*h̃^2/(12)) #dx
-    dU[4] = sin(θ) #* (1 + T[6]*h̃^2/(12)) #dy
-    dU[5] = zero(T)
-    dU[6] = zero(T)
-    dU[7] = zero(T)
+    @inbounds begin
+        m,θ,x,y,fx,fy,κ = u
+        s,c = sincos(θ)
+        dU[1] = fx*s-fy*c   #dM
+        dU[2] = m + κ               #dΘ
+        dU[3] = c #* (1 + T[5]*h̃^2/(12)) #dx
+        dU[4] = s #* (1 + T[6]*h̃^2/(12)) #dy
+        dU[5] = zero(T)
+        dU[6] = zero(T)
+        dU[7] = zero(T)
+    end 
     return dU
 end 
 
-function ode(t::AbstractVector{T},p,s) where{T}
+function ode(t::AbstractVector{T},p::SciMLBase.NullParameters,s) where{T}
     @inbounds m,θ,x,y,fx,fy,κ = t
     [fx*sin(θ)-fy*cos(θ),   #dM
     m + κ,               #dΘ
@@ -279,83 +285,115 @@ function ode(t::AbstractVector{T},p,s) where{T}
     zero(T)]
 end 
 
-function jac(t::AbstractArray{T,N},p,s) where{T,N} #jacobi 
-    @inbounds m,θ,x,y,fx,fy,κ = t
-    dT = zeros(T,7,7)
-    dT[1,2] = fx*cos(θ) + fy*sin(θ)
-    dT[1,5] = sin(θ)
-    dT[1,6] = -cos(θ)
-    dT[2,1] = one(T)
-    dT[2,7] = one(T)
-    dT[3,2] = -sin(θ)
-    dT[4,2] = cos(θ)
+function jac(t::AbstractArray{T,N},p::SciMLBase.NullParameters,s) where{T,N} #jacobi 
+    @inbounds begin
+    m,θ,x,y,fx,fy,κ = t
+        s,c = sincos(θ)
+        dT = zeros(T,7,7)
+        dT[1,2] = fx*c + fy*s
+        dT[1,5] = s
+        dT[1,6] = -c
+        dT[2,1] = one(T)
+        dT[2,7] = one(T)
+        dT[3,2] = -s
+        dT[4,2] = c
+    end 
     return dT
 end 
 
-function jac!(dt,t::AbstractArray{T,N},p::SciMLBase.NullParameters,s) where{T,N} #jacobi 
-    @inbounds m,θ,x,y,fx,fy,κ = t
-    dt[1,2] = fx*cos(θ) + fy*sin(θ)
-    dt[1,5] = sin(θ)
-    dt[1,6] = -cos(θ)
-    dt[2,1] = one(T)#
-    dt[2,7] = one(T)#
-    dt[3,2] = -sin(θ)
-    dt[4,2] = cos(θ)
+function jac!(dt,t::AbstractArray{T,N},p,s) where{T,N} #jacobi 
+    
+    @inbounds     m,θ,x,y,fx,fy,κ = t
+    @inbounds     s,c = sincos(θ)
+    @inbounds     dt[1,2] = fx*c + fy*s
+    @inbounds     dt[1,5] = s
+    @inbounds     dt[1,6] = -c
+    @inbounds     dt[2,1] = one(T)#
+    @inbounds     dt[2,7] = one(T)#
+    @inbounds     dt[3,2] = -s
+    @inbounds     dt[4,2] = c
+
     return dt
 end
 
-function vjp!(Jv,λ::AbstractArray{T,N},u::AbstractVector,t) where{T,N} #vjp
-    @inbounds δm,δθ,δx,δy,δfx,δfy= λ
-    @inbounds m,θ,x,y,fx,fy = u
-    # @show "test curve inner"
-    Jv[1] = -δθ 
-    Jv[2] = -(δy * cos(θ) - δx * sin(θ) +  δm * (fx*cos(θ) + fy*sin(θ)) )
-    Jv[5] = -(δm * sin(θ))
-    Jv[6] =  δm  * cos(θ) 
-    Jv[7] = zero(T) #-δθ 
+function vjp_beam!(Jv,λ::AbstractArray{T,N},u::AbstractVector,t) where{T,N} #vjp
+    @inbounds begin
+        δm,δθ,δx,δy,δfx,δfy,_= λ
+        m,θ,x,y,fx,fy,_ = u
+        s,c = sincos(θ)
+        Jv[1] = -δθ 
+        Jv[2] = -(δy * c - δx * s +  δm * (fx*c + fy*s) )
+        Jv[5] = -(δm * s)
+        Jv[6] =  δm  * c 
+        Jv[7] = -δθ
+    end  
     return nothing 
 end
 
-function vjp!(Jv,λ::AbstractArray{T,N},u::ODESolution,t,::SciMLBase.NullParameters) where{T,N} #vjp
-    fill!(Jv,zero(eltype(Jv)))
-    # @show "test curve"
-    vjp!(Jv,λ,u(t),t)
+function vjp_curved_beam!(Jv,λ::AbstractArray{T,N},u::AbstractVector,t) where{T,N} #vjp
+    @inbounds begin
+        δm,δθ,δx,δy,δfx,δfy = λ
+        m,θ,x,y,fx,fy,_ = u
+        s,c = sincos(θ)
+        Jv[1] = -δθ 
+        Jv[2] = -(δy * c - δx * s +  δm * (fx*c + fy*s) )
+        Jv[5] = -(δm * s)
+        Jv[6] =  δm  * c 
+
+    end  
     return nothing 
 end
 
+function vjp!(Jv,λ::AbstractArray{T,N},p::SciMLBase.NullParameters,t) where{T,N} #vjp
+  
+    #beam backpropergation
+    λ_jvp = @view λ[1:7]
+    Jv_jvp = @view Jv[1:7]
+    #beam reverse integration
+    du = @view Jv[8:14]
+    u = @view λ[8:14]
+    ode!(du,u,p,t)
+    
+    vjp_beam!(Jv_jvp,λ_jvp,u,t)
+    return nothing 
+end
 
 
 #with splines
 function ode!(du,u::AbstractArray{T,N},p::AbstractVector,t) where{T,N}
+    
     @inbounds M,θ,x,y,Fx,Fy = u
-    du[1] = Fx * sin(θ) - Fy *cos(θ)
+    s,c = sincos(θ)
+    du[1] = Fx * s - Fy *c
     du[2] = M + getspline(splinebasis,p,t)
-    du[3] = cos(θ) 
-    du[4] = sin(θ) 
+    du[3] = c 
+    du[4] = s 
     du[5] = zero(T)
     du[6] = zero(T)
-    # du[7] = zero(T)
 end 
 
-function vjp!(Jv,λ::AbstractArray{T,N},u::ODESolution,t,::AbstractVector) where{T,N} 
-    fill!(Jv,zero(eltype(Jv)))
-    # @show "test with spline"
-    vjp!(Jv,λ[1:6],u(t),t)
+function vjp!(Jv::AbstractArray{TJ,NJ},λ::AbstractArray{T,N},p::AbstractVector,t) where{T,N,TJ,NJ} 
+    #reverse integration of beam
+    du = @view Jv[end-6:end]
+    u = @view λ[end-6:end]
+    ode!(du,u,p,t)
+    #jvp reverse integration for adjoints
+    λ_jvp = @view λ[1:6]
+    Jv_jvp = @view Jv[1:6]
+    vjp_curved_beam!(Jv_jvp,λ_jvp,u,t)
+    #spline backpropagation     
     i,bs = evaluate_all(splinebasis,t)
-    Jv[6+i:-1:6+i+1-ORDER] .-=  bs .* λ[2]
+    
+    @inbounds Jv[6+i:-1:6+i+1-ORDER] .=  bs .* λ[2]  
     return nothing 
 end
 
 
-function vjp!(Jv,λ::AbstractArray{T,N},u::ODESolution{T,N2,uType},t) where{T,N,N2,uType}
-    vjp!(Jv,λ,u,t,u.prob.p)
-    # @show "test"
-    return nothing 
-end
+
 
 func = ODEFunction{true}(ode!, jac = jac!)
 
 prob = ODEProblem(func,zeros(Float32,7),(0f0,1f0))
 
-vjpfunc = ODEFunction(vjp!)
+vjpfunc = ODEFunction{true}(vjp!)
 vjpprob = ODEProblem(vjpfunc,ones(Float32,7),(1f0,0f0))

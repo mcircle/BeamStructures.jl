@@ -1,16 +1,16 @@
 
-function getnames(nodes::Vararg{Boundary,N}) where{N}
+function getnames(nodes::Vararg{<:Boundary,N}) where{N}
     NamedTuple{ntuple(i->Symbol(:Node_,i),N)}(nodes)
 end 
 
-function getnames(beams::Vararg{B,N}) where{N,B<:BeamElement}
+function getnames(beams::Vararg{<:BeamElement,N}) where{N}
     NamedTuple{ntuple(i->Symbol(:Beam_,i),N)}(beams)
 end 
 
-function prepare(args::Vararg{Union{B,Boundary},N}) where{N,B<:BeamElement}
+function prepare(args::Vararg{Union{<:BeamElement,<:Boundary},N}) where{N}
     beams = filter(x->isa(x,BeamElement),args)
     bounds = filter(x->isa(x,Boundary),args)
-    (;Beams = getnames(beams...),Nodes = getnames(bounds...))        
+    getnames(beams...), getnames(bounds...)        
 end 
 
 function getstartnodes(str::Structure)
@@ -79,7 +79,7 @@ findbeamsatnode(::Clamp,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (f
 findbeamsatnode(::Boundary,node::Int,nodes::AbstractVector{CartesianIndex{2}}) = (findall(x->x[1] == node,nodes),findall(x-> x[2] == node,nodes))
 normfactor(b::BeamElement) = 12 / (b.E*b.w*b.h^3) # 12/(E*I)
 normfactor_m(b::BeamElement) = normfactor(b) * b.l #M̃ = M * normvector_m
-normfactor_f(b::BeamElement) = b.l * normfactor_m(b) #F̃ = F * normvector_f
+normfactor_f(b::BeamElement) = normfactor_m(b) * b.l #F̃ = F * normvector_f
 
 function normvector(b::BeamElement)
     m = normfactor_m(b)                  # normfactor_m

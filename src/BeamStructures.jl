@@ -16,6 +16,7 @@ module BeamStructures
     using InteractiveUtils
     import ChainRulesCore as CRC
 
+    include("BSplines.jl")
     include("Beams.jl")
     include("Boundaries.jl")
     include("Connections.jl")

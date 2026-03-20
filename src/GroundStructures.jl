@@ -11,30 +11,36 @@ function GroundStructure(;solver = Tsit5(),sensalg = ForwardDiffSensitivity(),kw
     GroundStructure(solver,sensalg,kwargs)
 end 
 
-function (str::GroundStructure)(x::AbstractMatrix{T},bn::NamedTuple,adj::AbstractMatrix{TA},saveat::Union{AbstractFloat,AbstractVector}) where{T,TA}
+
+
+function (str::GroundStructure)(x::AbstractMatrix{T},beamtpl::NamedTuple,nodetpl::NamedTuple,adj::AbstractMatrix{TA},plt::Bool) where{T,TA}
     # x_ = reshape(x,3,:)
     
     nodepos = getstartnodes(adj)
-    cbeams = reduce(+,1:size(adj,1)-1)
-    xforces,nodes_ = changestartnodes(bn.Nodes,x)
-    function prob_func(prob,i,repeat) 
-        
-        u0,p = initialize_beam(bn.Beams,nodes_,xforces,nodepos,i)
-        remake(prob;u0 = u0,p = p)
-    end 
+    cbeams = size(adj,1) * (size(adj,1)-1) ÷ 2
+    movables = count(x->canchangeposition(x),values(nodetpl))
+    xpos = @view x[:,1:movables]
+    xforces = @view x[:,movables+1:end]
+    nodes_ = addpositions(nodetpl,xpos)
+    
+    prob_func = make_prob_func(beamtpl, nodes_, xforces, nodepos)
 
     ensprob  =  EnsembleProblem(prob;
                 prob_func = prob_func,
+                output_func = output_func(plt),
+                reduction = reduction_funcF!(plt),
+                u_init = initialize_u(T,beamtpl,plt)
                 )
 
     sol = solve(ensprob,str.Solver,
                 EnsembleThreads(),
-                reltol = 1e-6,abstol = 1e-6,saveat = saveat,
-                save_start = true,save_on = true,save_end = true,
+                reltol = 1e-6,abstol = 1e-6,
+                save_start = true,save_on = plt,save_end = true,
                 sensealg=str.SensAlg,
                 trajectories = cbeams
                 )
-    sol,(;Beams = bn.Beams,Nodes = nodes_)
+
+    output(sol,beamtpl,nodes_,Val(plt))
 end
 
 function EIz(beam::Beam{T}) where{T}
@@ -43,12 +49,12 @@ function EIz(beam::Beam{T}) where{T}
 end
 
 function reduction_func_admittance!(u,data,I,solfw,adj,beams)
-    for (sol,id,d0,beam) in zip(solfw,I,data,beams)
+    for (sol,id,d0,beam) in zip(eachslice(solfw,dims = 3),I,data,beams)
         isapprox(adj[id],0) && continue
         l = beam.l
         d = d0 .* adj[id] 
 
-        x,y = sol[end][3:4] .- sol[1][3:4]
+        x,y = sol[3:4,2] .- sol[3:4,1]
         # 1 = M, 2 = Fx , 3 = Fy
         i = id[1]
         j = id[2]
@@ -56,21 +62,20 @@ function reduction_func_admittance!(u,data,I,solfw,adj,beams)
         j_ = 3 * (j-1)+1:3*j
         u[i_,i_] .+= d
         u[j_,j_] .+= d
-        d[1,:] .= (-d[1,:] .+ y .* d[2,:] .- x .* d[3,:])
+        d[1,:] .= -(d[1,:] .+ y .* d[2,:] .+ x .* d[3,:])
         
         u[i_,j_] .-= d 
         u[j_,i_] .-= d' 
     end 
     for (idx,val) in enumerate(diag(u))
         iszero(val) || continue
-        u[idx,idx] = eps(eltype(val)) # avoid singularity
+        u[idx,idx] =  eps(eltype(val)) # avoid singularity
     end
     u,false
 end 
 
 function output_func_admittance(bsol::ODESolution{T,N,Q},i,fsol) where{T,N,Q}
-
-    (bsol[end][[1,5,6],:] ,false) #.* [4/9,x,y]
+    (Array(bsol)[[1,5,6],:,2] ,false) #.* [4/9,x,y]
 end
 
 function getidxs(sz)
@@ -88,24 +93,31 @@ end
 
 sigmoid(x) = 1 ./ (1 .+ exp.(-x))
 
-function admittance_matrix(sol::EnsembleSolution{T,N,S},adj,str,beams) where{T,N,S}
+
+function make_prob_func_admittance(sol::EnsembleSolution{T},adj,beams) where{T}
+    (prob,i,repeat) -> begin 
+        u0 = zeros(T,14,3)
+        u0[[2],1] .= one(T) #du/dθ
+        u0[[3],2] .= one(T) #du/dx
+        u0[[4],3] .= one(T) #du/dy
+        u0[end-6:end,:] .= sol
+        remake(prob;u0 = u0,p = SciMLBase.NullParameters(),tspan = (one(T),zero(T)))
+    end
+end
+
+function admittance_matrix(sol::AbstractArray{T,N},adj,str,beams) where{T,N}
     # adj = sigmoid(adj)
     idxs = getindices(size(adj,1))
-    lensol = length(sol)
-    function prob_func(prob,i,repeat) 
-        u0 = zeros(T,7,3)
-        u0[[2],1] .= one(T) #du/dx
-        u0[[3],2] .= one(T) #du/dy
-        u0[[4],3] .= one(T) #du/dθ
-        remake(prob;u0 = u0,p = sol[i],tspan = (one(T),zero(T)))
-    end
+    lensol = length(beams)
+    
+    prob_func = make_vjp_func(sol,beams)
     #dadj Gradient der Steifigkeitsmatrix berechnen  
     ensprob2  =  EnsembleProblem(vjpprob;prob_func = prob_func,
                                 output_func = (bsol,i) ->  output_func_admittance(bsol,i,sol),
                                 reduction = (u,data,I) -> reduction_func_admittance!(u,data,idxs[I],sol,adj,beams),
                                 u_init = zeros(eltype(adj),3 .* size(adj)...),
                                 )
-    sol = solve(ensprob2,str.Solver,save_on = false,save_start = false,save_end = true,#save_idxs = ad,#[2,3,4,9,10,11,16,17,18,22,23,24],#
+    sol = solve(ensprob2,str.Solver,save_on = false,save_start = true,save_end = true,#save_idxs = ad,#[2,3,4,9,10,11,16,17,18,22,23,24],#
                 EnsembleThreads(),
                 reltol = 1e-6,abstol = 1e-6,
                 trajectories = lensol
@@ -143,28 +155,19 @@ function effective_movement(k::AbstractMatrix{T},u::Pair{AV,AB}) where{T,AV,AB}
     f
 end
 
-function check_structure(bn,adj)
+function check_structure(beams,nodes,adj)
     cbeams = reduce(+,1:size(adj,1)-1)
-    @assert cbeams == length(bn.Beams) "Missing Beams! Need $(cbeams) and got only $(length(bn.Beams))"
-    @assert size(adj,1) == length(bn.Nodes) "Missing Nodes! Need $(size(adj,1)) and got only $(length(bn.Nodes))"
+    @assert cbeams == length(beams) "Missing Beams! Need $(cbeams) and got only $(length(bn.Beams))"
+    @assert size(adj,1) == length(nodes) "Missing Nodes! Need $(size(adj,1)) and got only $(length(nodetpl))"
 end 
 
- function (str::GroundStructure)(x::AbstractMatrix,bn,adj,saveat,::Val{false})
-    check_structure(bn,adj)
-    x = str(x,bn,adj,saveat)
-    sol,bn_ = x
-
-    sol,bn_#,st
+function (str::GroundStructure)(x::AbstractMatrix,beams,nodes,adj,plt::Bool)
+    check_structure(beams,nodes,adj)
+    return str(x,beams,nodes,adj,plt)
 end 
 
-function (str::GroundStructure)(x::AbstractMatrix,bn,adj,saveat,::Val{true})
-    check_structure(bn,adj)
-    sol,bn_ = str(x,bn,adj,saveat)
-    sol
-end 
-
-(str::GroundStructure)(x::AbstractMatrix,bn,adj,plt::Bool = false,saveat::Union{Real,AbstractVector} = []) = str(x,bn,adj,saveat,Val(plt))
-(str::GroundStructure)(x::AbstractVector,bn,adj,plt::Bool = false,saveat =[]) = str(reshape(x,3,:),bn,adj,saveat,Val(plt))
+(str::GroundStructure)(x::AbstractMatrix,bn::NamedTuple,adj,plt::Bool = false) = str(x,bn.Beams,bn.Nodes,adj,plt)
+(str::GroundStructure)(x::AbstractMatrix,beams::NamedTuple,nodes::NamedTuple,adj,plt::Bool = false) = str(x,beams,nodes,adj,plt)
 
 function (str::GroundStructure)(residuals::T,values::T,bn::NamedTuple,adj) where{T} #new loss
     sols,bn_ = str(values,bn,adj)
@@ -190,38 +193,41 @@ function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},fa
     return solp .- solm #.+ node[[6,4,5]]
 end 
 
-function residuals!(residuals::Matrix,adj::AbstractMatrix{TA},y::AbstractArray{T,N},bn) where{T,TA,N}
+function residuals!(residuals::Matrix,adj::AbstractMatrix{TA},y::AbstractArray{T,N},beamstpl,nodestpl) where{T,TA,N}
     
     ids = getindices(size(adj,1))
     adj_ = ifelse.(adj .> 1,1,adj)
     adj_ = ifelse.(adj_ .< 0,0,adj)
-    branches = count(x->isa(x,Branch),bn.Nodes)
+
+    branches = count(x->!isa(x,Clamp),nodestpl)
     residuals_forces = @view residuals[:,1:branches]
     residuals_positions = @view residuals[:,branches+1:end]
-
     forces = 1
     positions = 1
-    for n in getnodeswithbeams(adj,bn.Nodes)#axes(adj,1)
-        node = bn.Nodes[n]
-        beams = findbeamsatnode(node,n,ids)
-        res = reduceforceat(node,bn.Beams,y,adj[ids],beams)
-       
-        if !isempty(res)
-            residuals_forces[:,forces] .= res
+    for (node,beams) in beamsatnode(adj,nodestpl,beamstpl)
+
+        if forcesatnode(nodestpl[node])
+            reduceforceat!(view(residuals_forces,:,forces),nodestpl[node],beamstpl,y,beams)
+            # residuals_forces[:,forces] .= res
             forces += 1
         end 
-        res = reduceposat(node,bn.Beams,y,adj[ids],beams)
-        
-        if !isempty(res)
-            idxs = positions:positions + size(res,2) - 1
-            residuals_positions[:,idxs] .= res
-            positions = idxs[end] + 1
+
+        if !isempty(beams[2]) 
+            # idxs = positions:positions + length(beams[2]) -1
+            reduceposat!(view(residuals_positions,:,beams[2]),nodestpl[node],beamstpl,y,beams[2])
+            # positions = length(beams[2]) + 1
         end  
+
     end
     residuals 
 end 
 
 function residuals!(residuals::Matrix,adj::AbstractMatrix{T},y::EnsembleSolution,bn) where{T}
     y = toArray(y)
-    residuals!(residuals,adj,y,bn)
+    residuals!(residuals,adj,y,bn.Beams,bn.Nodes)
+end
+
+function residuals!(residuals::Matrix,adj::AbstractMatrix{T},y::EnsembleSolution,beams,nodes) where{T}
+    y = toArray(y)
+    residuals!(residuals,adj,y,beams,nodes)
 end

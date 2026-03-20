@@ -23,7 +23,8 @@ struct Clamp{A<:Real} <:Boundary{A}
 end 
 Clamp(x,y,ϕ,fx,fy,mz) = Clamp(promote(x,y,ϕ,fx,fy,mz)...)
 (cl::Clamp{T})(displacement) where{T} = cl
-
+type(::Clamp{T}) where{T} = Clamp
+type(::Type{Clamp{T}}) where{T} = Clamp
 
 struct Branch{A<:Real} <:Boundary{A}
     x::A
@@ -39,6 +40,7 @@ struct Branch{A<:Real} <:Boundary{A}
 end
 (cl::Branch{T})(displacement) where{T} = cl
 Branch(x,y,ϕ,fx,fy,mz) = Branch(promote(x,y,ϕ,fx,fy,mz)...)
+type(::Branch{T}) where{T} = Branch
 type(::Type{Branch{T}}) where{T} = Branch
 struct Free{A<:Real} <:Boundary{A}
     x::A
@@ -139,13 +141,27 @@ gettype(::B) where{T,B<:Boundary{T}} = B
 (::Type{B})(x::AbstractVector) where{B<:Boundary} = B(x...)
 
 
+function Base.getindex(b::B, i::Int) where B<:Boundary
+    fields = fieldnames(B)
+    N = fieldcount(B)
+    if i > N
+        throw(BoundsError(b, i))
+    end
+    getfield(b, fields[i])
+end
+
+function Base.iterate(b::B, i::Int=1) where B<:Boundary
+    N = fieldcount(B)
+    i> N && return nothing
+    fields = fieldnames(B)
+    return getfield(b, fields[i]), i+1
+end
+
 Base.length(::B) where{B<:Boundary} = fieldcount(B)
 Base.lastindex(::B) where{B<:Boundary} = fieldcount(B)
-Base.getindex(b::Boundary,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Clamp)[idx])
-Base.getindex(b::Movable,idx::AbstractVector) = map(x->getfield(b,x),fieldnames(Movable)[idx])
-Base.getindex(b::Boundary,idx::Int) = getfield(b,fieldnames(Clamp)[idx])
-Base.getindex(b::Movable,idx::Int) = getfield(b,fieldnames(Movable)[idx])
-Base.iterate(b::B,i::Int = 1) where{B<:Boundary} = i > length(b) ? nothing : (getfield(b,i),i+1)
+
+# Base.iterate(b::B,i::Int = 1) where{B<:Boundary} = i > length(b) ? nothing : (getfield(b,i),i+1)
+Base.getindex(b::B,i::AbstractVector) where{B<:Boundary} = map(j->getindex(b,j),i)
 Base.IteratorSize(b::T) where{T<:Boundary} = Base.HasLength()
 
 function (b::Type{B})(x::NamedTuple) where{B<:Boundary}
@@ -164,6 +180,12 @@ function change_node(node::Boundary;kwargs...)
     node
 end  
 
+forcesatnode(::Boundary) = true
+forcesatnode(::Clamp) = false
+
+canchangeposition(::Boundary) = true
+canchangeposition(::Clamp) = false
+
 Base.zero(::B) where{T,B<:Boundary{T}} = B(zeros(T,6)...)
 
 Base.:*(a::Real,b::T) where{T<:Boundary} = T(a .* b...)
@@ -181,8 +203,7 @@ Base.:/(b::T,a::Real)where{T<:Boundary} = T(b ./ a...)
 
 @generated function Base.:+(a::B,b::NamedTuple{V,NTuple{N,T2}}) where{T,V,N,T2,B<:Boundary{T}} 
     fn = fieldnames(B)
-    # println("Fields: ", fn)
-    # println(fn[1] in V)
+
     exprs = [:( $(QuoteNode(f)) in $V ? getproperty(a, $(QuoteNode(f))) + $T(getproperty(b, $(QuoteNode(f)))) : getproperty(a, $(QuoteNode(f))) ) for f in fn]
     return quote
         $(Expr(:call, :B, exprs...))
@@ -190,8 +211,10 @@ Base.:/(b::T,a::Real)where{T<:Boundary} = T(b ./ a...)
     # B( map(f -> hasproperty(b,f) ? getproperty(a,f) + getproperty(b,f) : getproperty(a,f), fn)... )
 end
 
-Base.zero(::Type{T}) where{T<:Boundary} = T(zeros(eltype(T),6)...)
 
+
+Base.zero(::Type{T}) where{T<:Boundary} = T(zeros(eltype(T),6)...)
+Base.promote_rule(::Type{T}, ::Type{S}) where{T<:Boundary{TT},S<:Boundary{SS}} where{TT,SS} = T, S, promote_type(TT,SS)
 
 Optimisers.functor(x::T) where{T<:Boundary} = (NamedTuple{fieldnames(T)}(x[1:end]),T)
 Optimisers.init(o::Adam, x::B) where{B<:Boundary{T}} where{T}  = (B(zeros(T,6)...), B(zeros(T,6)...), T.(o.beta))
