@@ -43,10 +43,7 @@ function (str::GroundStructure)(x::AbstractMatrix{T},beamtpl::NamedTuple,nodetpl
     output(sol,beamtpl,nodes_,Val(plt))
 end
 
-function EIz(beam::Beam{T}) where{T}
-    Iz = beam.w * beam.h^3/12
-    EIz =beam.E * Iz
-end
+
 
 function reduction_func_admittance!(u,data,I,solfw,adj,beams)
     for (sol,id,d0,beam) in zip(eachslice(solfw,dims = 3),I,data,beams)
@@ -130,7 +127,9 @@ function reduction_func_admittance_!((u,data_out),data,I,solfw,adj,beams)
     reduction_func_admittance!(u,data,I,solfw,adj,beams)
     [u,append!(data_out,data)],false
 end 
-
+# AV being the indices of the non-moveable nodes, 
+# [1,2,3] => [ϕ,x,y] of node 1 for example 
+# AB being the indices of the moveable nodes
 function effective_stiffness(k::AbstractMatrix{T},u::Pair{AV,AB}) where{T,AV,AB}
     nomoveidcs = [u[1]...]
     moveables = [u[2]...]

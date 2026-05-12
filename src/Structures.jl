@@ -42,6 +42,26 @@ function initialize_beam(node::Boundary,beam::CurvedBeam,parameters::AbstractVec
     return [m,θ0 + θs,x./l,y./l,fx,fy,zero(T)],beam.κ0 .*l
 end 
 
+function initialize_beam(node::LinearSlider,beam::Beam,parameters::AbstractVector{T}) where {T}
+    x,y,θ0, = node.x,node.y,node.ϕ
+    l,θs,κ = beam.l,beam.θs,beam.κ0
+    m,fx,fy = parameters
+    m *= normfactor_m(beam) #am Balkenelement
+    fx *= normfactor_f(beam) #am Balkenelement
+    fy *= normfactor_f(beam) #am Balkenelement
+    return [m,θ0 + θs,x./l,y./l,fx,fy,κ*l],SciMLBase.NullParameters()
+end 
+
+function initialize_beam(node::LinearSlider,beam::CurvedBeam,parameters::AbstractVector{T}) where {T}
+    x,y,θ0 = node.x,node.y,node.ϕ,node.α
+    l,θs = beam.l,beam.θs
+    m,f,s = parameters
+    m *= normfactor_m(beam) #am Balkenelement
+    f *= normfactor_f(beam) #am Balkenelement
+    fy, fx = f .*sincos(θ0)
+    return [m,θ0 + θs,x./l,y./l,fx,fy,zero(T)],beam.κ0 .*l
+end 
+
 function initialize_beam(node::CompliantClamp,beam::Beam,parameters::AbstractVector{T}) where {T}
     x,y,θ0, = node.x,node.y,node.ϕ
     l,κ = beam.l,beam.κ0
@@ -118,11 +138,11 @@ function reduceposat!(res,node::Boundary,beams::NamedTuple,y::AbstractArray{T,3}
     return nothing
 end
 
-dir_vector(node::LinearSlider) = [cos(node.dir),sin(node.dir)]
+
 function reduceposat(node::LinearSlider,beams::NamedTuple,y::AbstractArray{T,3},beamnbrs) where{T}
-    ϕ = node.ϕ
-    x,y = node.p0 .+ s .* dir_vector(node)
-    res = map(x-> [ϕ,x,y] .- scalepos(beams[x],y[2:4,2,x],Val(2)),beamnbrs)
+    for (i,b) in enumerate(beamnbrs)
+        res[:,i] .= [node.ϕ,node.x,node.y] .- scalepos(beams[b],y[2:4,2,b],Val(2))
+    end
     reduce(hcat,res)
 end
 
@@ -142,8 +162,10 @@ function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},be
     solm = reduce((init,beampos)->init .- scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = solp ) 
     return solm 
 end 
+
 function reduceforceat!(res,node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T}
     # scale the forces according to the beamdimensions and add them up
+    # y solution of integration 
     res .-= node[[6,4,5]]
     for b in beamsidxs[1]
         res .+= scaleforce(Beams[b],y[[1,5,6],2,b])
@@ -154,16 +176,24 @@ function reduceforceat!(res,node::Boundary,Beams::NamedTuple,y::AbstractArray{T,
     return nothing 
 end 
 
-function dir_matrix(node::LinearSlider{T}) where{T} 
-    mat = zeros(T,3,3)
-    mat[1] = one(T)
-    mat[2:3,2] .= [cos(node.dir),sin(node.dir)]
-    return mat
-end 
-function reduceforceat(node::LinearSlider{TN},Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T,TN}
-    solp = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],2,beampos]),beamsidxs[1];init = zeros(T,3))
-    solm = reduce((init,beampos)->init .+ scaleforce(Beams[beampos],y[[1,5,6],1,beampos]),beamsidxs[2];init = zeros(T,3)) 
-    return dir_matrix(node) * (solp .- solm) 
+function reduceforceat!(res,node::LinearSlider{TN},Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T,TN}
+    tmp = node[[6,4,5]]
+    # force angle is equal to slider angle, sum of force magnitude equal to zero, force amplitude perpendicular to slider direction not important
+    # res[1] = sum of moments
+    # res[2] = sum of amplitude forces  
+    # res[3] =  direction of sum of forces should be perpendicular to slider direction
+    for b in beamsidxs[1]
+        tmp .+= scaleforce(Beams[b],y[[1,5,6],2,b])
+    end 
+    for b in beamsidxs[2]
+        tmp .-= scaleforce(Beams[b],y[[1,5,6],1,b])
+    end
+    
+    res[1] = tmp[1]
+    res[2] = tmp[2] * cos(node.ϕ) + tmp[3] * sin(node.ϕ)
+    res[3] = atan(tmp[3],tmp[2]) - node.ϕ - π / 2f0
+
+    return nothing 
 end
 
 function reduceforceat(node::Joint{TN},Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) where{T,TN}
@@ -176,9 +206,9 @@ reduceforceat(node::Clamp,Beams::NamedTuple,y::AbstractArray{T,3},beamsidxs) whe
  
 
 function residuals!(residuals,str::Structure,y::AbstractArray{T,3},beamstpl,nodestpl) where{T}
-    # idcs = LinearIndices(residuals)#CartesianIndices((1:3,1:fld(length(residuals),3))))
+    
     adj = str.AdjMat
-    branches = count(x->!isa(x,Clamp),nodestpl)
+    branches = count(x->canchangeposition(x),nodestpl)
     residuals_forces = @view residuals[:,1:branches]
     residuals_positions = @view residuals[:,branches+1:end]
     forces = 1
@@ -187,13 +217,10 @@ function residuals!(residuals,str::Structure,y::AbstractArray{T,3},beamstpl,node
 
         if forcesatnode(nodestpl[node])
             reduceforceat!(view(residuals_forces,:,forces),nodestpl[node],beamstpl,y,beams)
-            # residuals_forces[:,forces] .= res
             forces += 1
         end 
         if !isempty(beams[2]) 
-            # idxs = positions:positions + length(beams[2]) -1
             reduceposat!(view(residuals_positions,:,beams[2]),nodestpl[node],beamstpl,y,beams[2])
-            # positions = length(beams[2]) + 1
         end  
     end
     residuals 
@@ -212,7 +239,7 @@ addposition(node::BT,pos::AbstractVector{T}) where{T,BT<:Boundary{T}} =node + (;
 
 function addposition(node::BT,pos::AbstractVector{T}) where{T,Tb,BT<:Boundary{Tb}} 
     Te = promote_type(T,Tb)
-    type(BT)(Te.(node[1:end])...) + (;x = pos[1],y = pos[2],ϕ = pos[3])
+    node + (;x = pos[1],y = pos[2],ϕ = pos[3])
 end 
 
 function addposition(node::Movable{Tb},pos::AbstractVector{T}) where{T,Tb}  
@@ -222,7 +249,15 @@ function addposition(node::Movable{Tb},pos::AbstractVector{T}) where{T,Tb}
 end
 
 addposition(node::Clamp{T},pos::AbstractVector{T}) where{T} = node
-addposition(node::LinearSlider,pos::AbstractVector{T}) where{T}  = LinearSlider{T}(node[1:3]...,pos[1]) 
+
+function addposition(node::LinearSlider,pos::AbstractVector{T}) where{T}  
+    s = pos[1]
+    # pos[2] and pos[3] are not relevant, force direction is given by slider angle, force amplitude is not relevant
+    x =  s * cos(node.ϕ)
+    y =  s * sin(node.ϕ)
+    node + (;x = x,y = y) 
+end 
+
 addposition(node::Joint,pos::AbstractVector{T}) where{T}  = Joint{T}(node[1:2]...,pos[1]) 
 addposition(node::Boundary,pos::Nothing)  = node
 
@@ -231,12 +266,10 @@ function addpositions(nodes::NamedTuple{names,T},xpos::AbstractMatrix) where{nam
 
     newnodes = Vector{Pair{Symbol,Boundary}}(undef, size(xpos,2))
     n = 0
-    pullbacknodes = Vector{Symbol}(undef,size(xpos,2))
     for node in names
         if canchangeposition(nodes[node])
             n += 1
             newnode = addposition(nodes[node],xpos[:,n])
-            @inbounds pullbacknodes[n] = node
             @inbounds newnodes[n] = node => newnode
         end 
 
@@ -314,13 +347,13 @@ function (str::Structure)(residuals::T,values::T,beams::NamedTuple,nodes::NamedT
 end 
 (str::Structure)(residuals::T,values::T,bn) where{T} = str(residuals,values,bn[1],bn[2])
 
-function getinitials(str::Structure,beams::NamedTuple,nodes::NamedTuple)
-    initsize = length(beams) + count(x->!isa(x,Clamp),values(nodes))
+function getinitials(beams::NamedTuple,nodes::NamedTuple)
+    initsize = length(beams) + count(x->canchangeposition(x),nodes)
     return  (3,initsize)
 end 
 
-function Base.zeros(::Type{T},str::Structure,beams,nodes) where{T}
-    zeros(T,getinitials(str,beams,nodes))
+function Base.zeros(::Type{T},beams,nodes) where{T}
+    zeros(T,getinitials(beams,nodes))
 end 
 
 

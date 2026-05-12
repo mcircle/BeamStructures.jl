@@ -28,10 +28,10 @@ module BeamStructures
     include("ChainRulesExt.jl")
     include("IteratorExt.jl")
     
-    export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand,CurvedBeam
+    export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand,CurvedBeam,BeamElement
 
     export learningrate,changenode
 
-    export Boundary,ExtForces, Clamp, Branch, Free, Structure,residuals!,getinitials
+    export Boundary,ExtForces, Clamp, Branch, Free, Structure,residuals!,getinitials,createmesh
 
 end

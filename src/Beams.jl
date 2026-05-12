@@ -78,6 +78,36 @@ function change_beam(beam::Beam;kwargs...)
     beam
 end  
 
+function isstraight(beam::Beam{T}) where{T}
+    return isapprox(beam.κ0, 0, atol = 1e-6)
+end
+
+function isstraight(beam::CurvedBeam{T}) where{T}
+    return isapprox(beam.κ0, zeros{T,5}, atol = 1e-6)
+end
+
+function EIz(beam::BeamElement{T}) where{T}
+    Iz = beam.w * beam.h^3/12
+    EIz =beam.E * Iz
+end
+
+function shouldbeambuckle(beam::B,y::AbstractArray{T,N}) where{N,T,B<:BeamElement{T}}
+    tmp = true
+    tmp &= isstraight(beam)    
+    tmp || return tmp
+    # α == angle in compressing direction?
+    α = atan(y[6],y[5]) #force angle
+    tmp &= all(isapprox.(α,beam.θs .+ π, atol = 1e-2))
+    tmp || return tmp
+    # a > critical load for buckling, beam straight and force angle in the compressing direction, then it should buckle
+    a = hypot(y[5],y[6]) #force magnitude
+    eiz = EIz(beam) 
+    tmp &= a > (π^2 * eiz / beam.l^2) #critical load for buckling
+    return tmp
+end
+
+
+
 gettype(::Beam{T}) where{T} = Beam
 gettype(::CurvedBeam{T}) where{T} = CurvedBeam
 

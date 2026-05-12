@@ -29,9 +29,12 @@ function CRC.rrule(::Type{B},x,y,ϕ,fx,fy,mz) where{T<:Real,B<:Boundary{T}}
     return B(x,y,ϕ,fx,fy,mz),back_boundary
 end
 
-function CRC.rrule(::typeof(+),b::B,nt::NamedTuple) where{T<:Real,B<:Boundary{T}}
+function CRC.rrule(::typeof(+),b::B,nt::NamedTuple{names,Types}) where{T<:Real,names,Types,B<:Boundary{T}}
     function back_add(ȳ)
-        return NoTangent(), ȳ, ZeroTangent()
+        # @show ȳ,NamedTuple{names}(map(x->getproperty(ȳ,x),names)...)
+        # nt_ =ZeroTangent() #@thunk(NamedTuple{names}(map(x->getproperty(ȳ,x),names)...))
+        nt_ = Tangent{NamedTuple{names,Types}}(;map(x->x => getproperty(ȳ,x),names)...)
+        return NoTangent(), ȳ, nt_
     end 
     return b + nt,back_add
 end
@@ -87,9 +90,8 @@ end
 function reduceposat_back!(ȳ,∂y,y,
     beamnbrs::AbstractVector{Int},node::Bo,beams::BT,
     ∂beams = CRC.zero_tangent(beams)) where{beamnames,Tu,Bo,BT<:NamedTuple{beamnames,Tu}}
-
     for (n,b) in enumerate(beamnbrs)
-        _,dbeam,dy,_ = scalepos_back(ȳ[:,n],y[2:4,2,b],beams[b])     
+        _,dbeam,dy,_ = scalepos_back(ȳ[:,n],y[2:4,2,b],beams[b])    
         ∂beams -= Tangent{BT}(;beamnames[b] => dbeam)
         @inbounds ∂y[2:4,2,b] .-= dy
     end
@@ -365,24 +367,24 @@ end
 function force_bound_back(ȳ,∂y,y,beams,idxs,∂beams::Tangent{BT} = CRC.zero_tangent(beams)) where{BT}
     ∂beams = forcesbackatend!(∂y,∂beams,ȳ,y,beams,idxs[1])
     ∂beams = forcesbackatstart!(∂y,∂beams,ȳ,y,beams,idxs[2])
-    return ∂beams 
+    return ∂beams, ZeroTangent()
 end 
 
-# function CRC.rrule(::typeof(reduceforceat),node::No,beams,y,idxs) where{No}
-    
-#     sol = reduceforceat(node,beams,y,idxs)
-#     function force_bound_back(ȳ,∂beams::Tangent{BT} = CRC.zero_tangent(beams)) where{BT}
-        
-#         ∂y = CRC.zero_tangent(y)
-#         ∂beams = forcesbackatend!(∂y,ȳ,y,beams,idxs[2])
-#         ∂beams = forcesbackatstart!(∂y,∂beams,ȳ,y,beams,idxs[1])
+force_bound_back(ȳ,∂y,y,beams,idxs,∂beams,::B) where{T,B<:Boundary{T}} = force_bound_back(ȳ,∂y,y,beams,idxs,∂beams)
 
-#         ∂node = ZeroTangent() 
-#         return NoTangent(),∂node,∂beams,∂y,NoTangent()
-#     end
-
-#     return sol,force_bound_back
-# end   
+function force_bound_back(ȳ,∂y,y,beams,idxs,∂beams,node::No) where{T,No<:LinearSlider{T}}
+    # res[1] = tmp[1]
+    # res[2] = tmp[2] * cos(node.ϕ) + tmp[3] * sin(node.ϕ)
+    # res[3] = atan(tmp[3],tmp[2]) - node.ϕ - π / 2f0
+    s,c = sincos(node.ϕ)
+    teiler = y[2]^2 + y[3]^2
+    tmp = @SVector [ȳ[1],
+                    ȳ[2,:] * c - y[3] / teiler * ȳ[2],
+                    ȳ[3,:] * s + y[2] / teiler * ȳ[3]]
+    ∂beams = force_bound_back(tmp,∂y,y,beams,idxs,∂beams)
+    δnodes = CRC.Tangent{No}(ϕ = -y[2] *  s * ȳ[2] + y[3,:] * c * ȳ[3])
+    return ∂beams, δnodes
+end
 
 function CRC.rrule(::typeof(reduceforceat),node::No,beams,y::AbstractArray{T,3},factors,idxs) where{T,No}
 
@@ -412,36 +414,6 @@ function CRC.rrule(::typeof(reduceforceat),node::No,beams,y::AbstractArray{T,3},
     end 
     return sol,force_bound_back
 end 
-
-# function CRC.rrule(::typeof(reduceforceat),node::LinearSlider{No},beams,y::AbstractArray{T,3},factors,idxs) where{T,No}
-    
-#     sol = reduceforceat(node,beams,y,factors,idxs)
-#     function force_bound_back(ȳ)
-#         y_idxs = getforceindices(idxs)
-#         ∂y = zero(y)
-#         ∂fac = zero(factors)
-#         y_ = @view y[y_idxs]
-#         ∂y_ = @view ∂y[y_idxs] 
-        
-#         ∂beams = Tangent{typeof(beams)}(;ntuple(x->keys(beams)[x]=>ZeroTangent(),length(beams))...)
-#         for (b,yb,dyb) in zip(vcat(idxs...),eachcol(y_),eachcol(∂y_))
-            
-#             f, rr_norm = CRC.rrule(scaleforce,beams[b],yb)
-#             if b in idxs[2]
-#                 _,dbeam,dyrr_ = rr_norm(-ȳ) 
-#                 ∂fac[b] = sum(trans .* f .* ȳ) 
-#             else
-#                 _,dbeam,dyrr_ = rr_norm(ȳ)
-#                 ∂fac[b] = -sum(trans .* f .* ȳ) 
-#             end 
-#             ∂beams += Tangent{typeof(beams)}(;Symbol(:Beam_,b) => dbeam)
-#             dyb .= dyrr_ #./ length(idxs)
-#         end 
-#         ∂node = CRC.zero_tangent(LinearSlider{No})#;fx = ȳ[2],fy = ȳ[3],mz = ȳ[1])
-#         return NoTangent(),∂node,∂beams,∂y,∂fac,NoTangent()
-#     end 
-#     return sol,force_bound_back
-# end 
 
 
 
@@ -483,10 +455,12 @@ function CRC.rrule(::typeof(residuals!),residuals,str::Structure,y,beamtpl::BT,n
         for (node,beams) in beamsatnode(adj,nodetpl,beamtpl)
             
             if forcesatnode(nodetpl[node])
-                ∂beams = force_bound_back(view(ȳ_forces,:,forcenbr),∂y,y,beamtpl,beams,∂beams)        
+                ∂beams,dnode = force_bound_back(view(ȳ_forces,:,forcenbr),∂y,y,beamtpl,beams,∂beams,nodetpl[node])
+                ∂nodes += Tangent{NT}(;node => dnode)
                 forcenbr += 1
             end
             if !isempty(beams[2])
+                
                 ∂beams = reduceposat_back!(view(ȳ_positions,:,beams[2]),∂y,y,beams[2],nodetpl[node],beamtpl,∂beams)
                 ∂nodes += Tangent{NT}(;node =>  Tangent{typeof(nodetpl[node])}(;x = sum(ȳ_positions[2,beams[2]]),y =  sum(ȳ_positions[3,beams[2]]),ϕ = sum(ȳ_positions[1,beams[2]])))
                
@@ -551,7 +525,7 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
         for (node,beams) in beamsatnode(adj,nodetpl,beamtpl)
             
             if forcesatnode(nodetpl[node])
-                force_bound_back(view(ȳ_forces,:,forcenbr),∂y,y,beamtpl,beams,∂beams)        
+                force_bound_back(view(ȳ_forces,:,forcenbr),∂y,y,beamtpl,beams,∂beams,nodetpl[node])        
                 forcenbr += 1
             end
             if !isempty(beams[2])

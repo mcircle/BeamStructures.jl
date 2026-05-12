@@ -1,13 +1,6 @@
 
-# abstract type AbstractBoundary{T} end
 abstract type Boundary{T} end #extern
-# abstract type Movable{A<:Real} <:AbstractBoundary{A} end 
-# struct Boundaries{A<:Boundary{T} where{T<:Real}}
-#     nodes::Vector{A}
-#     function Boundaries(nodes::Vector{A}) where{A<:Boundary{T},T<:Real}
-#         new{A}(nodes)
-#     end 
-# end
+
 
 struct Clamp{A<:Real} <:Boundary{A}
     x::A
@@ -22,7 +15,6 @@ struct Clamp{A<:Real} <:Boundary{A}
     Clamp{T}(x,y,ϕ,fx,fy,mz) where{T<:Real} = new{T}(x,y,ϕ,fx,fy,mz)
 end 
 Clamp(x,y,ϕ,fx,fy,mz) = Clamp(promote(x,y,ϕ,fx,fy,mz)...)
-(cl::Clamp{T})(displacement) where{T} = cl
 type(::Clamp{T}) where{T} = Clamp
 type(::Type{Clamp{T}}) where{T} = Clamp
 
@@ -42,6 +34,7 @@ end
 Branch(x,y,ϕ,fx,fy,mz) = Branch(promote(x,y,ϕ,fx,fy,mz)...)
 type(::Branch{T}) where{T} = Branch
 type(::Type{Branch{T}}) where{T} = Branch
+
 struct Free{A<:Real} <:Boundary{A}
     x::A
     y::A
@@ -70,19 +63,21 @@ end
 (cl::ExtForces{T})(displacement) where{T} = cl[1:6]
 
 struct LinearSlider{A<:Real} <:Boundary{A}
-    x::A
-    y::A
-    dir::A
-    ϕ::A
-    s::A
+    x::A # x0
+    y::A # y0
+    ϕ::A 
     fx::A
     fy::A
     mz::A
-    function LinearSlider(x::T,y::T,dir::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
-        new{T}(x,y,dir,ϕ,zero(T))
+    function LinearSlider(x::T,y::T,ϕ::T,fx::T,fy::T,mz::T) where{T}
+        new{T}(x,y,ϕ,fx,fy,mz)
     end 
 end
 
+function LinearSlider{T}(x,y,ϕ,fx,fy,mz) where{T<:Real} 
+    p = T.([x,y,ϕ,fx,fy,mz])
+    LinearSlider(p...)
+end 
 struct Joint{A<:Real} <:Boundary{A}
     x::A
     y::A
@@ -110,6 +105,7 @@ mutable struct Movable{A<:Real} <:Boundary{A}
         new{T}(T(x),T(y),T(ϕ),T(fx),T(fy),T(mz),dir)
     end 
 end
+
 function Movable(x,y,ϕ,fx,fy,mz)
     p = promote(x,y,ϕ,fx,fy,mz)
     Branch{eltype(p)}(p...)
@@ -131,9 +127,6 @@ struct CompliantClamp{A} <:Boundary{A}
     end 
 end
 (cl::CompliantClamp{T})(displacement) where{T} = cl[1:6]
-
-
-
 
 gettype(::B) where{T,B<:Boundary{T}} = B
 
@@ -173,18 +166,22 @@ function (b::Type{B})(x::NamedTuple{kwargs}) where{T,kwargs,B<:Boundary{T}}
     B(map(k->getfield(x,k),fieldnames(b))...)
 end 
 
-function change_node(node::Boundary;kwargs...)
-    for (field,value) in kwargs
-        node = Setfield.@set node.$field = value 
-    end 
-    node
-end  
+# function change_node(node::Boundary;kwargs...)
+#     for (field,value) in kwargs
+#         node = Setfield.@set node.$field = value 
+#     end 
+#     node
+# end  
 
 forcesatnode(::Boundary) = true
 forcesatnode(::Clamp) = false
 
 canchangeposition(::Boundary) = true
 canchangeposition(::Clamp) = false
+
+degreesofreedom(::Boundary) = [1,1,1]
+degreesofreedom(::Clamp) = [0,0,0]
+degreesofreedom(node::LinearSlider) = [0,cos(node.ϕ % π/2),sin(node.ϕ % π/2)]
 
 Base.zero(::B) where{T,B<:Boundary{T}} = B(zeros(T,6)...)
 
@@ -201,17 +198,17 @@ Base.:/(a::Real,b::T) where{T<:Boundary} = T(a ./ b...)
 Base.:/(b::T,a::Real)where{T<:Boundary} = T(b ./ a...)
 
 
-@generated function Base.:+(a::B,b::NamedTuple{V,NTuple{N,T2}}) where{T,V,N,T2,B<:Boundary{T}} 
+@generated function Base.:+(a::B,b::NamedTuple{V,Tu}) where{T,N,T2,V,Tu<:NTuple{N,T2},B<:Boundary{T}} 
+    # println(Tu)
     fn = fieldnames(B)
-
-    exprs = [:( $(QuoteNode(f)) in $V ? getproperty(a, $(QuoteNode(f))) + $T(getproperty(b, $(QuoteNode(f)))) : getproperty(a, $(QuoteNode(f))) ) for f in fn]
+    t = promote_type(T, T2)
+    a_ = type(a)
+    exprs = [:( $(QuoteNode(f)) in $V ? getproperty(a, $(QuoteNode(f))) + $t(getproperty(b, $(QuoteNode(f)))) : getproperty(a, $(QuoteNode(f))) ) for f in fn]
     return quote
-        $(Expr(:call, :B, exprs...))
+        $(Expr(:call, a_, exprs...))
     end
     # B( map(f -> hasproperty(b,f) ? getproperty(a,f) + getproperty(b,f) : getproperty(a,f), fn)... )
 end
-
-
 
 Base.zero(::Type{T}) where{T<:Boundary} = T(zeros(eltype(T),6)...)
 Base.promote_rule(::Type{T}, ::Type{S}) where{T<:Boundary{TT},S<:Boundary{SS}} where{TT,SS} = T, S, promote_type(TT,SS)
