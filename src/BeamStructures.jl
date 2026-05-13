@@ -27,6 +27,7 @@ module BeamStructures
     include("Optimizations.jl")
     include("ChainRulesExt.jl")
     include("IteratorExt.jl")
+    include("Exports.jl")
     
     export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand,CurvedBeam,BeamElement
 

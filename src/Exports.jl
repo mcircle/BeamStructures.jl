@@ -101,7 +101,7 @@ function createmesh(sol::ODESolution{T,N,Q},beam) where{T,N,Q}
     me = GeometryBasics.Mesh(poly,faces)
 end 
 
-function createmesh(str,beams,nodes,inits::AbstractMatrix)
+function createmesh(str,beams,nodes,inits::AbstractMatrix; name = str_$(now()) )
     sol = str(inits,beams,nodes,true) # get EnsembleSolution for all beams 
     isfile("./meshobjects") && mkdir("./meshobjects")
     meobjs = Vector{GeometryBasics.Mesh}(undef, length(beams))
@@ -109,7 +109,7 @@ function createmesh(str,beams,nodes,inits::AbstractMatrix)
         meobjs[idx] = createmesh(sol[idx],beams[idx])    
     end
     merged = GeometryBasics.merge(meobjs)
-    save("./meshobjects/str_$(now()).stl",merged)
+    save("./meshobjects/$name.stl",merged)
     merged,meobjs
 end 
 
@@ -249,4 +249,174 @@ function points_intersecting_faces(face1::Vector{Point3f},face2::Vector{Point3f}
 end
 
 
+
+using BSplineKit, StaticArrays, LinearAlgebra, Gmsh
+using DifferentialEquations
+
+# ─────────────────────────────────────────────────────────
+# 1. Glatte neutrale Faser aus ODESolution
+# ─────────────────────────────────────────────────────────
+
+function fit_centerline(sol::ODESolution; nsamples=80)
+    svals = range(0.0, 1.0, length=nsamples)
+
+    # idxs 3:4 → x, y Koordinaten der ODESolution
+    pts = sol.(svals, idxs=3:4)
+    xs  = getindex.(pts, 1)
+    ys  = getindex.(pts, 2)
+    ts  = collect(svals)
+
+    basis = BSplineBasis(BSplineOrder(4), KnotVector(ts))
+    itp_x = interpolate(xs, basis)
+    itp_y = interpolate(ys, basis)
+
+    # Auswertung Kurve und Ableitung
+    centerline(s)  = SVector(itp_x(s), itp_y(s), 0.0)
+
+    ditp_x = Derivative(1) * itp_x
+    ditp_y = Derivative(1) * itp_y
+    dcenterline(s) = SVector(ditp_x(s), ditp_y(s), 0.0)
+
+    return centerline, dcenterline
+end
+
+# ─────────────────────────────────────────────────────────
+# 2. Lokales Frenet-Frame entlang der Faser
+#    Für Balken in xy-Ebene: Binormale = z-Achse (stabil)
+# ─────────────────────────────────────────────────────────
+
+function beam_frame(dcenterline, s)
+    tang  = normalize(dcenterline(s))
+    binom = SVector(0.0, 0.0, 1.0)        # stabil für planare Balken
+    norm_ = normalize(cross(binom, tang))  # liegt in xy-Ebene
+    return tang, norm_, binom
+end
+
+# ─────────────────────────────────────────────────────────
+# 3. Querschnittsecken im Weltkoordinatensystem
+# ─────────────────────────────────────────────────────────
+
+function crosssection_corners(centerline, dcenterline, s, hw, hh)
+    c       = centerline(s)
+    _, n, b = beam_frame(dcenterline, s)
+    # Uhrzeigersinn von vorne betrachtet → wichtig für Wire-Orientierung
+    return [
+        c + n * hh + b * hw,   # oben rechts
+        c - n * hh + b * hw,   # unten rechts
+        c - n * hh - b * hw,   # unten links
+        c + n * hh - b * hw,   # oben links
+    ]
+end
+
+# ─────────────────────────────────────────────────────────
+# 4. Einen Wire (Querschnitt) in Gmsh anlegen
+#    Gibt den Wire-Tag zurück
+# ─────────────────────────────────────────────────────────
+
+function add_wire!(corners, pt_tag, ln_tag, loop_tag, wire_tag)
+    npts = length(corners)
+
+    # Punkte anlegen
+    pt_tags = map(corners) do c
+        t = pt_tag[]
+        gmsh.model.occ.addPoint(c[1], c[2], c[3], tag=t)
+        pt_tag[] += 1
+        t
+    end
+
+    # Linien zwischen den Punkten (geschlossen)
+    ln_tags = map(1:npts) do i
+        t  = ln_tag[]
+        p1 = pt_tags[i]
+        p2 = pt_tags[mod1(i + 1, npts)]
+        gmsh.model.occ.addLine(p1, p2, tag=t)
+        ln_tag[] += 1
+        t
+    end
+
+    # CurveLoop und Wire
+    gmsh.model.occ.addCurveLoop(ln_tags, tag=loop_tag[])
+    gmsh.model.occ.addWire([loop_tag[]], tag=wire_tag[])
+
+    wt = wire_tag[]
+    loop_tag[]  += 1
+    wire_tag[]  += 1
+    return wt
+end
+
+# ─────────────────────────────────────────────────────────
+# 5. Einen einzelnen Balken als ThruSection-Solid anlegen
+#    Gibt den Solid-Tag zurück
+# ─────────────────────────────────────────────────────────
+
+function add_beam_solid!(centerline, dcenterline, beam,
+                         pt_tag, ln_tag, loop_tag, wire_tag, solid_tag;
+                         nstations=20)
+
+    svals    = range(0.0, 1.0, length=nstations)
+    hw, hh   = beam.w / 2, beam.h / 2
+    wire_tags = Int[]
+
+    for s in svals
+        corners = crosssection_corners(centerline, dcenterline, s, hw, hh)
+        wt = add_wire!(corners, pt_tag, ln_tag, loop_tag, wire_tag)
+        push!(wire_tags, wt)
+    end
+
+    # Solid durch alle Querschnitte legen
+    result = gmsh.model.occ.addThruSections(
+        wire_tags,
+        tag      = solid_tag[],
+        makeSolid = true, # geschlossenes Volumen inkl. Stirnflächen
+        makeRuled = false # glatte (interpolierte) Mantelflächen
+    )
+
+    st = solid_tag[]
+    solid_tag[] += 1
+    return st
+end
+
+# ─────────────────────────────────────────────────────────
+# 6. Alle Balken → fuse → STEP
+# ─────────────────────────────────────────────────────────
+
+function export_structure_step(str, beams, nodes, inits;
+                                filename="structure",
+                                nstations=20)
+
+    sol = str(inits, beams, nodes, true)  # EnsembleSolution
+
+    gmsh.initialize()
+    gmsh.model.add(filename)
+
+    # Tag-Zähler als Refs damit add_wire! sie mutieren kann
+    pt_tag    = Ref(1)
+    ln_tag    = Ref(1)
+    loop_tag  = Ref(1)
+    wire_tag  = Ref(1)
+    solid_tag = Ref(1)
+
+    solid_tags = Int[]
+
+    for idx in eachindex(beams)
+        cl, dcl = fit_centerline(sol[idx])
+        st = add_beam_solid!(cl, dcl, beams[idx],
+                             pt_tag, ln_tag, loop_tag, wire_tag, solid_tag;
+                             nstations)
+        push!(solid_tags, st)
+    end
+
+    # Alle Balken zu einem Solid fusionieren
+    if length(solid_tags) > 1
+        tool  = [(3, solid_tags[1])]
+        obj   = [(3, t) for t in solid_tags[2:end]]
+        gmsh.model.occ.fuse(tool, obj)
+    end
+
+    gmsh.model.occ.synchronize()
+    gmsh.write("$(filename).step")
+
+    gmsh.finalize()
+    @info "Exportiert: $(filename).step"
+end
 
