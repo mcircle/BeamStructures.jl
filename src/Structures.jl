@@ -291,7 +291,7 @@ end
 
 function reduction_funcF!(u,data,I)
     for (d_out,i) in zip(data,I)
-    
+        @assert any(isnan.(d_out[1])) == false "NaN in data, cannot save solution"
         @inbounds u[:,1,i] .= d_out[1]
         @inbounds u[:,2,i] .= d_out[2]
     end 
@@ -329,7 +329,7 @@ function (str::Structure)(x::AbstractArray{T,2},beams::NamedTuple,nodes::NamedTu
                 EnsembleThreads(),
                 reltol = 1e-6,abstol = 1e-6,#saveat = 0.01,
                 save_start = true,save_on = v,save_end = true,
-                sensealg=str.SensAlg,
+                sensealg=str.SensAlg,;verbose = false,
                 trajectories = length(beams)
                 )
 
@@ -341,8 +341,12 @@ end
 
 
 function (str::Structure)(residuals::T,values::T,beams::NamedTuple,nodes::NamedTuple) where{T} #new loss
+    # get solution for given parameters
+    # @show values
+    # @show residuals
     sols,beams,nodes_ = str(values,beams,nodes,false)
     residuals!(residuals,str,sols,beams,nodes_)
+    # @show residuals
     nothing
 end 
 (str::Structure)(residuals::T,values::T,bn) where{T} = str(residuals,values,bn[1],bn[2])

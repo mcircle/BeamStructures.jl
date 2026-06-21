@@ -1,5 +1,7 @@
-abstract type BeamElement{T} end
+# Abstrakter Basistyp für alle Balkenelement-Varianten.
 
+abstract type BeamElement{T} end
+# Gerader oder schwach gekrümmter Balken mit skalarer Krümmung κ0.
 struct Beam{T<:Real} <:BeamElement{T}
     l::T
     h::T
@@ -9,7 +11,7 @@ struct Beam{T<:Real} <:BeamElement{T}
     θs::T
     θe::T
 end 
-
+# Stark gekrümmter Balken mit vektorwertiger Krümmung κ0 (z. B. Spline-Stützwerte).
 struct CurvedBeam{T<:Real} <:BeamElement{T}
     l::T
     h::T
@@ -25,36 +27,38 @@ struct CurvedBeam{T<:Real} <:BeamElement{T}
     end 
 end
 
-# function CurvedBeam(l,h,w,κ0;E = 2.1f5,θs = 0)
-#     p = promote(l,h,w,E,θs)
-#     θe = get_θe(p[5],κ0)
-#     CurvedBeam{eltype(p)}(p[1],p[2],p[3],κ0,p[4],p[5],θe)
-# end
-
+# Äußerer Keyword-Konstruktor für CurvedBeam mit optionalem θe.
+# Wenn θe nicht übergeben wird, wird es aus der Krümmung berechnet (get_θe).
 function CurvedBeam{T}(l,h,w,κ0;E = 2.1f5,θs = 0,θe = nothing) where{T}
+    p = T.([l,h,w,E,θs])
     if isnothing(θe)
         θe = get_θe(p[5],k0)
     else
-        p = T.([l,h,w,E,θs])
         θe = T(θe)
     end 
     k0 = T.(κ0)
     CurvedBeam{T}(p[1],p[2],p[3],k0,p[4],p[5],θe)
 end
 
+
+# ReLU-artige Clamp-Funktion: gibt max(x, m) zurück.
+# Verhindert physikalisch unsinnige negative Werte (z. B. l, h, w < 0).
 relu(x::T,m = zero(T)) where{T} = ifelse(x < m,m,x)
 
+
+# Äußerer Konstruktor: leitet Typparameter automatisch per promote ab.
+# θe wird standardmäßig aus Länge und Krümmung berechnet: θe = θs + l*κ0
 function Beam(l,h,w,κ0;E = 2.1f5,θs = 0,θe = θs + l*κ0)
 
     p = promote(l,h,w,κ0,E,θs,θe)
     Beam(p...)
 end 
-
+# Typisierter Konstruktor: konvertiert alle Parameter explizit nach T.
 function Beam{T}(l,h,w,κ0;E = 2.1f5,θs = 0f0,θe = θs + l*κ0) where{T}
 
     Beam(T.([l,h,w,κ0,E,θs,θe])...)
 end 
-
+# Konstruktion aus einem NamedTuple (wird von Optimisers.functor benötigt).
 function Beam{T}(nt::NamedTuple) where{T}
     Beam((map(k->getfield(nt,k),fieldnames(Beam))...))
 end 
@@ -62,7 +66,7 @@ end
 function CurvedBeam{T}(nt::NamedTuple) where{T}
     CurvedBeam{T}((map(k->getfield(nt,k),fieldnames(CurvedBeam))...))
 end 
-
+# Aufrufbarer Balken: erzeugt neuen Beam aus einem Vektor (Funktor-Interface)
 function (b::Beam{T})(nt::AbstractVector) where{T}
     Beam(nt...)
 end 
@@ -71,6 +75,7 @@ function Base.show(io::IO,beam::BeamElement)
     return println(io, "Beam with Length: $(beam[1]),width: $(beam[3]), height: $(beam[2]), curvature: $(beam[4]) and E: $(beam[5])")
 end 
 
+# Ändert einzelne Felder eines Beam per Keyword-Argument (nutzt Setfield.jl).
 function change_beam(beam::Beam;kwargs...)
     for (field,value) in kwargs
         beam = Setfield.@set beam.$field = value 
@@ -78,12 +83,13 @@ function change_beam(beam::Beam;kwargs...)
     beam
 end  
 
+# Prüft, ob ein Balken gerade ist (κ0 ≈ 0)
 function isstraight(beam::Beam{T}) where{T}
     return isapprox(beam.κ0, 0, atol = 1e-6)
 end
 
 function isstraight(beam::CurvedBeam{T}) where{T}
-    return isapprox(beam.κ0, zeros{T,5}, atol = 1e-6)
+    return isapprox(beam.κ0, zeros(T,5), atol = 1e-6)
 end
 
 function EIz(beam::BeamElement{T}) where{T}
@@ -91,6 +97,8 @@ function EIz(beam::BeamElement{T}) where{T}
     EIz =beam.E * Iz
 end
 
+# Prüft, ob ein Balken knickt (Euler-Knickung):
+# Bedingungen: gerade, Kraft in Druckrichtung (θs + π), Kraft > kritische Last π²EI/l²
 function shouldbeambuckle(beam::B,y::AbstractArray{T,N}) where{N,T,B<:BeamElement{T}}
     tmp = true
     tmp &= isstraight(beam)    
@@ -114,10 +122,11 @@ gettype(::CurvedBeam{T}) where{T} = CurvedBeam
 Base.length(b::BeamElement) = 7
 Base.lastindex(b::BeamElement) = 7
 
+# Feldwertabfrage per Symbol (delegiert an getfield).
 function Base.getproperty(b::BeamElement,n::Symbol)
     val = getfield(b,n)
 end 
-
+# Indexzugriff per Integer: beam[1] → erstes Feld, beam[2] → zweites Feld, ...
 function Base.getindex(b::B, i::Int) where B<:BeamElement
     N = fieldcount(B)
     i > N &&  throw(BoundsError(b, i))
@@ -133,7 +142,7 @@ function Base.iterate(b::B, i::Int=1) where B<:BeamElement
     fields = fieldnames(B)
     return getfield(b, fields[i]), i+1
 end
-
+# Typtest: ist das Objekt ein CurvedBeam?
 isacurvedbeam(::CurvedBeam) = true
 isacurvedbeam(::BeamElement) = false
 
@@ -148,12 +157,13 @@ Base.:*(a::Real,b::B) where{B<:BeamElement} = B(a .* b...)
 Base.:*(b::B,a::Real) where{B<:BeamElement} = B(a .* b...)
 Base.:*(a::B,b::B) where{B<:BeamElement} = B(a .* b...)
 
-
+# Subtraktion mit ReLU-Clipping für geometrische Felder (l, h, w ≥ 1e-2).
+# @generated erzeugt zur Compile-Zeit feldspezifischen Code ohne Laufzeit-Overhead.
 @generated function Base.:-(a::B,b::B) where{T,B<:BeamElement{T}} 
     fields = fieldnames(a)
     exprs = [:($(QuoteNode(f)) ∈ [:l,:h,:w] ? relu(getfield(a, $(QuoteNode(f))) .- getfield(b,$(QuoteNode(f))),1f-2) : (getfield(a, $(QuoteNode(f))) .- getfield(b,$(QuoteNode(f))))) for f in fields]
     return quote
-        $(Expr(:call,Beam, exprs...))
+        $(Expr(:call,B, exprs...))
     end
 end 
 
@@ -178,7 +188,7 @@ Optimisers._trainable(b::Beam{T},fr) where{T} = Beam{T}(merge(Optimisers.mapvalu
 
 Base.zero(::Beam{T}) where{T} = Beam(zeros(T,7)...)
 Base.zero(::CurvedBeam{T}) where{T} = CurvedBeam(zeros(T,7)...)
-
+# Einheitsskalierung — kann angepasst werden, um Parameter zu normalisieren.
 BEAM_SCALE = (
     l = 1,
     h = 1,
@@ -189,7 +199,7 @@ BEAM_SCALE = (
     θe = 1
 )
 
-
+# Skaliert einen Gradienten-Balken dx feldweise mit scale.
 @generated function scale_beam(dx,b::B, scale) where{T,B<:BeamElement{T}} 
     fields = fieldnames(dx)
     # println(fields)'
@@ -199,7 +209,7 @@ BEAM_SCALE = (
         $(Expr(:call, :B, exprs...))
     end
 end
-
+# Kehrt die Skalierung um (Division).
 @generated function invscale_beams(dx,::B, scale) where{T,B<:BeamElement{T}}
     fields = fieldnames(dx)
     exprs = [:( getproperty(dx, $(QuoteNode(f))) / getproperty(scale, $(QuoteNode(f)))) for f in fields]
@@ -207,7 +217,10 @@ end
         $(Expr(:call, :B, exprs...))
     end
 end
-
+# ============================================================
+#  Adam-Moment-Update (generierte feldweise Operationen)
+# ============================================================
+# Erster Moment (Mittelwert): mt ← β*mt + (1-β)*dx  (mit nothing-Guard)
 @generated function combine(β,mt::B,dx) where{T,B<:BeamElement{T}}
     fields = fieldnames(mt)
     # exprs = [:(β * getproperty(mt, $(QuoteNode(f))) + (1-β) * getproperty(dx, $(QuoteNode(f)))) for f in fields]
@@ -216,7 +229,7 @@ end
         $(Expr(:call,B, exprs...))
     end
 end 
-
+# Zweiter Moment (Varianz): vt ← β*vt + (1-β)*dx²  (mit nothing-Guard)
 @generated function combineabs2(β,mt::B,dx) where{T,B<:BeamElement{T}}
     fields = fieldnames(mt)
     exprs = [:(isnothing(getfield(dx, $(QuoteNode(f)))) ? zero(T) : β * getfield(mt, $(QuoteNode(f))) + (1-β) * abs2.(getfield(dx, $(QuoteNode(f))))) for f in fields]
@@ -224,7 +237,7 @@ end
         $(Expr(:call,B, exprs...))
     end
 end 
-
+# Bias-korrigierter Adam-Schritt: mt̂ / (√vt̂ + ϵ) * η
 @generated function combine(η,βt,mt::B,vt::B,ϵ) where{B<:BeamElement}
     fields = fieldnames(mt)
     exprs = [:(getfield(mt, $(QuoteNode(f))) ./ (1-βt[1]) ./ (sqrt.(getfield(vt, $(QuoteNode(f))) ./ (1 -βt[2])).+ ϵ).* η) for f in fields]
@@ -232,7 +245,7 @@ end
         $(Expr(:call,B, exprs...))
     end
 end 
-
+# Vollständiger Adam-Update-Schritt für BeamElement-Parameter.
 function Optimisers.apply!(o::Adam,state,b::BeamElement{T},dx) where{T}
     η, β, ϵ = T(o.eta), T.(o.beta), T(o.epsilon)
     mt, vt, βt = state
@@ -286,9 +299,12 @@ function Optimisers.apply!(o::AdamW, state, x::Beam{T}, dx) where T
   
     return (mt, vt, βt .* β), dx′′
 end
-
-
-
+# ============================================================
+#  ODE-System — Euler-Bernoulli-Balken
+# ============================================================
+# Zustandsvektor u = [M, θ, x, y, Fx, Fy, κ]
+# Integriert über Bogenlänge s ∈ [0, l]
+# In-place Variante (für DifferentialEquations.jl, spart Allokationen).
 function ode!(dU,u::AbstractVector{T},p::SciMLBase.NullParameters,s) where{T}
     @inbounds begin
         m,θ,x,y,fx,fy,κ = u

@@ -7,6 +7,7 @@ module BeamStructures
     using Zygote
     using SciMLSensitivity
     using SciMLBase
+    using DiffEqBase
     using Setfield
     using Random
     using Base
@@ -28,7 +29,7 @@ module BeamStructures
     include("ChainRulesExt.jl")
     include("IteratorExt.jl")
     include("Exports.jl")
-    
+
     export Connections, edge_adjacence,incidence,Adj_norm, Beam,zeros,rand,CurvedBeam,BeamElement
 
     export learningrate,changenode
