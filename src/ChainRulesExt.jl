@@ -697,23 +697,23 @@ function initialize_u0_vjp(x::AbstractVector{T},solforward::AbstractArray{T,N},b
 end 
 
 function make_vjp_func(∂sol,solforward::Array{T,3},beams::BT) where{BT,T}
-    (prob,i,repeat) -> begin
-        u0,p = initialize_u0_vjp(view(∂sol,:,2,i),view(solforward,:,2,i),beams[i])
+    (prob,ctx) -> begin
+        u0,p = initialize_u0_vjp(view(∂sol,:,2,ctx.sim_id),view(solforward,:,2,ctx.sim_id),beams[ctx.sim_id])
         remake(prob;u0 = u0,p = p)
     end
     
 end
 
 function make_vjp_func(solforward::Array{T,3},beams::BT) where{BT,T}
-    (prob,i,repeat) -> begin
-        u0,p = initialize_u0_vjp(solforward[:,2,i],beams[i])
+    (prob,ctx) -> begin
+        u0,p = initialize_u0_vjp(solforward[:,2,ctx.sim_id],beams[ctx.sim_id])
         remake(prob;u0 = u0,p = p)
     end
     
 end
 
 function make_output_func(beams::BT, nodes_::NT, nodepos,xforces) where{BT,NT}
-    (sol,i) -> output_func(sol,beams,nodes_,nodepos,xforces,i)
+    (sol,ctx) -> output_func(sol,beams,nodes_,nodepos,xforces,ctx.sim_id)
 end
 
 function CRC.rrule(str::Structure,x::AbstractArray{T,N},beams::NamedTuple{beamnames,BT},nodes::NamedTuple{nodenames,NT}) where{T,N,beamnames,BT,nodenames,NT}

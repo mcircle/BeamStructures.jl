@@ -279,8 +279,8 @@ end
 
 
 function make_prob_func(beams::BT, nodes_::NT, xforces, nodepos) where {BT,NT}
-    (prob, i, repeat) -> begin
-         u0, p = initialize_beam(beams, nodes_, xforces, nodepos, i)
+    (prob, ctx) -> begin
+         u0, p = initialize_beam(beams, nodes_, xforces, nodepos, ctx.sim_id)
         remake(prob; u0=u0, p=p)
     end
 end
