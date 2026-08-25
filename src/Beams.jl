@@ -31,12 +31,12 @@ end
 # Wenn θe nicht übergeben wird, wird es aus der Krümmung berechnet (get_θe).
 function CurvedBeam{T}(l,h,w,κ0;E = 2.1f5,θs = 0,θe = nothing) where{T}
     p = T.([l,h,w,E,θs])
+    k0 = T.(κ0)
     if isnothing(θe)
         θe = get_θe(p[5],k0)
     else
         θe = T(θe)
     end 
-    k0 = T.(κ0)
     CurvedBeam{T}(p[1],p[2],p[3],k0,p[4],p[5],θe)
 end
 
