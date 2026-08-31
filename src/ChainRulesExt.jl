@@ -525,12 +525,12 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
         for (node,beams) in beamsatnode(adj,nodetpl,beamtpl)
             
             if forcesatnode(nodetpl[node])
-                force_bound_back(view(ȳ_forces,:,forcenbr),∂y,y,beamtpl,beams,∂beams,nodetpl[node])        
+                ∂beams,dnode = force_bound_back(view(ȳ_forces,:,forcenbr),∂y,y,beamtpl,beams,∂beams,nodetpl[node])        
                 forcenbr += 1
             end
             if !isempty(beams[2])
-                reduceposat_back!(view(ȳ_positions,:,beams[2]),∂y,y,beams[2],nodetpl[node],beamtpl,∂beams)
-                @show ∂nodes += Tangent{NT}(;node =>  Tangent{typeof(nodetpl[node])}(;x = sum(ȳ_positions[2,beams[2]]),y =  sum(ȳ_positions[3,beams[2]]),ϕ = sum(ȳ_positions[1,beams[2]])))
+                ∂beams = reduceposat_back!(view(ȳ_positions,:,beams[2]),∂y,y,beams[2],nodetpl[node],beamtpl,∂beams)
+                ∂nodes += Tangent{NT}(;node =>  Tangent{typeof(nodetpl[node])}(;x = sum(ȳ_positions[2,beams[2]]),y =  sum(ȳ_positions[3,beams[2]]),ϕ = sum(ȳ_positions[1,beams[2]])))
                 
                 # @show ∂nodes[node]
             end
@@ -627,6 +627,7 @@ function output_func(u,beams::NamedTuple{beamnames,BT},nodes::NamedTuple{nodenam
     ∂nodes = Tangent{NamedTuple{nodenames,NT}}(;nodenames[x_idxs] => pullback_init_node(λ_positions,typeof(nodes[x_idxs]),beams[i]))
     (∂beams,∂nodes,∂xforces),false
 end 
+output_func(u::ODESolution,beams::NamedTuple{beamnames,BT},nodes::NamedTuple{nodenames,NT},nodepos,x,i) where{beamnames,nodenames,BT,NT} = output_func(u.u,beams,nodes,nodepos,x,i)
 
 function reduction_func!(u,data,I)
     
@@ -713,7 +714,7 @@ function make_vjp_func(solforward::Array{T,3},beams::BT) where{BT,T}
 end
 
 function make_output_func(beams::BT, nodes_::NT, nodepos,xforces) where{BT,NT}
-    (sol,ctx) -> output_func(sol,beams,nodes_,nodepos,xforces,ctx.sim_id)
+    (sol,ctx) -> output_func(sol.u,beams,nodes_,nodepos,xforces,ctx.sim_id)
 end
 
 function CRC.rrule(str::Structure,x::AbstractArray{T,N},beams::NamedTuple{beamnames,BT},nodes::NamedTuple{nodenames,NT}) where{T,N,beamnames,BT,nodenames,NT}
@@ -772,10 +773,10 @@ function CRC.rrule(str::Structure,x::AbstractArray{T,N},beams::NamedTuple{beamna
         for i in 1:length(beams)
             nom = normfactor_m(beams[i])
             d = @view dsol[:,1,i]
-            dNodes += Tangent{NamedTuple{nodenames,NT}}(;nodenames[i] => pullback_init_node(d[2:4],typeof(nodes[nodepos[i]]),beams[i]))
+            dNodes += Tangent{NamedTuple{nodenames,NT}}(;nodenames[nodepos[i]] => pullback_init_node(d[2:4],typeof(nodes[nodepos[i]]),beams[i]))
             dBeams += Tangent{NamedTuple{beamnames,BT}}(;beamnames[i] => pullback_init_beam(d,nodes_[nodepos[i]],beams[i],xforces[:,i]))
         end
-        # @show dNodes
+        # @show ∂xpos
         change_pullback(dNodes,∂xpos)
         # add_startgrads!(∂x,∂sol[[3,4,2],1,:],bn.Beams,bn.Nodes,)
         @inbounds ∂x[:,1:anz] .= ∂xpos
@@ -831,7 +832,7 @@ function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},beams::NamedTuple{b
     function back_groundstr(ȳ)
         @inbounds ∂sol,∂Beams,∂Nodes = ȳ
         dsol = CRC.unthunk(∂sol)
-        ∂x = similar(x)
+        ∂x = zero(x)
         ∂xpos = @view ∂x[:,1:anz]
         # ∂xforces .= ∂sol[[1,5,6],2,:]
         ∂xforces = @view ∂x[:,anz+1:end] # similar(x, size(x,1), size(x,2) - anz) 
@@ -839,10 +840,10 @@ function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},beams::NamedTuple{b
         for i in 1:length(beams)
             @inbounds ∂xforces[:,i] .= dsol[[1,5,6],1,i] .* normvector(beams[i])
         end
-        prob_func = make_vjp_func(∂sol,out,beams)
+        prob_func = make_vjp_func(dsol,out,beams)
         #integriere Rückwärtsproblem
         ensprob  =  EnsembleProblem(vjpprob;prob_func = prob_func,
-                                            output_func = (sol,i) -> output_func(sol,beams,nodes_,nodepos,xforces,i),
+                                            output_func = (sol,ctx) -> output_func(sol,beams,nodes_,nodepos,xforces,ctx.sim_id),
                                             reduction = (u,data,I) -> reduction_func!(u,data,I),
                                             u_init = u_init(∂xforces,beams,nodes,∂Beams,∂Nodes)
                                             )
@@ -852,15 +853,18 @@ function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},beams::NamedTuple{b
                     save_on = false,save_start=false,save_end = true,
                     trajectories = cbeams
                     )
-        @inbounds ∂xforces,dBeams,dNodes = solp
-
+        @inbounds ∂xforces,dBeams,dNodes = solp.u
         for i in 1:length(beams)
             d = @view dsol[:,1,i]
-            dNodes += Tangent{NamedTuple{nodenames,NT}}(;nodenames[i] => pullback_init_node(d[2:4],typeof(nodes[nodepos[i]]),beams[i]))
+            dNodes += Tangent{NamedTuple{nodenames,NT}}(;nodenames[nodepos[i]] => pullback_init_node(d[2:4],typeof(nodes[nodepos[i]]),beams[i]))
             dBeams += Tangent{NamedTuple{beamnames,BT}}(;beamnames[i] => pullback_init_beam(d,nodes_[nodepos[i]],beams[i],xforces[:,i]))
         end
         ∂adj = ZeroTangent()
         change_pullback(dNodes,∂xpos)
+        # @show ∂xpos
+        @inbounds ∂x[:,1:anz] .= ∂xpos
+        @inbounds ∂x[:,anz+1:end] .= ∂xforces
+
         return NoTangent(),∂x,dBeams,dNodes,∂adj,ZeroTangent()
     end
     (out,beams,nodes_),back_groundstr
@@ -902,8 +906,8 @@ function CRC.rrule(::typeof(admittance_matrix),solfw::AbstractArray{T,N},adj,str
 
             Δd[2, :] .-= y .* Δd[1, :]
             Δd[3,:]  .-= x .* Δd[1, :] 
-            Δd[1, :] .*= -1
-            Δd .+= (view(ȳ,i_,i_) + view(ȳ,j_,j_))
+            # Δd[1, :] .*= -1
+            Δd .-= (view(ȳ,i_,i_) + view(ȳ,j_,j_))
 
             # Pullback der elementweisen Multiplikation mit d0
             ∂adj[id] += sum(d0 .* Δd ) 

@@ -34,7 +34,8 @@ end
 Branch(x,y,ϕ,fx,fy,mz) = Branch(promote(x,y,ϕ,fx,fy,mz)...)
 type(::Branch{T}) where{T} = Branch
 type(::Type{Branch{T}}) where{T} = Branch
-
+getnodemarker(::Clamp) = :clamp
+getnodemarker(::Branch) = :circle
 struct Free{A<:Real} <:Boundary{A}
     x::A
     y::A

@@ -360,7 +360,7 @@ end
 
 function export_structure_step(str, beams, nodes;
                                 filename="structure",
-                                nstations=20)
+                                nstations=50)
     inits = zeros(Float32,beams,nodes)
     sol = str(inits, beams, nodes, true)  # EnsembleSolution
 
@@ -369,8 +369,8 @@ function export_structure_step(str, beams, nodes;
 
     solid_tags = Tuple{Int32,Int32}[]
 
-    for idx in eachindex(sol)
-        cl, dcl = fit_centerline(sol[idx], beams[idx])
+    for idx in eachindex(sol.u)
+        cl, dcl = fit_centerline(sol.u[idx], beams[idx])
         st = add_beam_solid!(cl, dcl, beams[idx]; nstations=nstations,meshsize = 0.0)
         push!(solid_tags, st)
     end

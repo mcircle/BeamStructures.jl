@@ -13,7 +13,7 @@ end
 
 
 
-function (str::GroundStructure)(x::AbstractMatrix{T},beamtpl::NamedTuple,nodetpl::NamedTuple,adj::AbstractMatrix{TA},plt::Bool) where{T,TA}
+function (str::GroundStructure)(x::AbstractMatrix{T},beamtpl::NamedTuple,nodetpl::NamedTuple,adj::AbstractMatrix{TA},vplt::Val{plt}) where{T,TA,plt}
     # x_ = reshape(x,3,:)
     
     nodepos = getstartnodes(adj)
@@ -40,7 +40,7 @@ function (str::GroundStructure)(x::AbstractMatrix{T},beamtpl::NamedTuple,nodetpl
                 trajectories = cbeams
                 )
 
-    output(sol,beamtpl,nodes_,Val(plt))
+    output(sol,beamtpl,nodes_,vplt)
 end
 
 
@@ -72,7 +72,7 @@ function reduction_func_admittance!(u,data,I,solfw,adj,beams)
 end 
 
 function output_func_admittance(bsol::ODESolution{T,N,Q},i,fsol) where{T,N,Q}
-    (Array(bsol)[[1,5,6],:,2] ,false) #.* [4/9,x,y]
+    (Array(bsol)[[1,5,6],:,2] ,false) 
 end
 
 function getidxs(sz)
@@ -160,18 +160,18 @@ function check_structure(beams,nodes,adj)
     @assert size(adj,1) == length(nodes) "Missing Nodes! Need $(size(adj,1)) and got only $(length(nodetpl))"
 end 
 
-function (str::GroundStructure)(x::AbstractMatrix,beams,nodes,adj,plt::Bool)
+function (str::GroundStructure)(x::AbstractMatrix,beams::NamedTuple,nodes::NamedTuple,adj::AbstractMatrix,plt::Bool=false)
     check_structure(beams,nodes,adj)
-    return str(x,beams,nodes,adj,plt)
+    return str(x,beams,nodes,adj,Val(plt))
 end 
 
-(str::GroundStructure)(x::AbstractMatrix,bn::NamedTuple,adj,plt::Bool = false) = str(x,bn.Beams,bn.Nodes,adj,plt)
-(str::GroundStructure)(x::AbstractMatrix,beams::NamedTuple,nodes::NamedTuple,adj,plt::Bool = false) = str(x,beams,nodes,adj,plt)
+(str::GroundStructure)(x::AbstractMatrix,bn::NamedTuple,adj::AbstractMatrix,plt::Bool = false) = str(x,bn.Beams,bn.Nodes,adj,plt)
+# (str::GroundStructure)(x::AbstractMatrix,beams::NamedTuple,nodes::NamedTuple,adj,plt::Bool = false) = str(x,beams,nodes,adj,plt)
 
-function (str::GroundStructure)(residuals::T,values::T,bn::NamedTuple,adj) where{T} #new loss
-    sols,bn_ = str(values,bn,adj)
+function (str::GroundStructure)(residuals::T,values::T,beams::NamedTuple,nodes::NamedTuple,adj::AbstractMatrix) where{T<:AbstractMatrix} #new loss
+    sols,bn_ = str(values,beams,nodes,adj)
     # sols_ = toArray(sols)
-    residuals!(residuals,adj,sols,bn_)
+    residuals!(residuals,adj,sols,beams,nodes)
 end 
 
 function reduceposat(node::Boundary,beams::NamedTuple,y::AbstractArray{T,N},factors::AbstractVector{TF},beamnbrs) where{T,TF,N}

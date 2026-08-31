@@ -329,7 +329,7 @@ function (str::Structure)(x::AbstractArray{T,2},beams::NamedTuple,nodes::NamedTu
                 EnsembleThreads(),
                 reltol = 1e-6,abstol = 1e-6,#saveat = 0.01,
                 save_start = true,save_on = v,save_end = true,
-                sensealg=str.SensAlg,;verbose = false,
+                sensealg=str.SensAlg,
                 trajectories = length(beams)
                 )
 
@@ -362,5 +362,5 @@ end
 
 
 function Random.rand(::Type{T},str::Structure,beams,nodes) where{T}
-    rand(T,getinitials(str,beams,nodes))
+    rand(T,getinitials(beams,nodes))
 end 
