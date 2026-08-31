@@ -529,6 +529,8 @@ function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::Abstract
                 forcenbr += 1
             end
             if !isempty(beams[2])
+                reduceposat_back!(view(ȳ_positions,:,beams[2]),∂y,y,beams[2],nodetpl[node],beamtpl,∂beams)
+                ∂nodes += Tangent{NT}(;node =>  Tangent{typeof(nodetpl[node])}(;x = sum(ȳ_positions[2,beams[2]]),y =  sum(ȳ_positions[3,beams[2]]),ϕ = sum(ȳ_positions[1,beams[2]])))
                 ∂beams = reduceposat_back!(view(ȳ_positions,:,beams[2]),∂y,y,beams[2],nodetpl[node],beamtpl,∂beams)
                 ∂nodes += Tangent{NT}(;node =>  Tangent{typeof(nodetpl[node])}(;x = sum(ȳ_positions[2,beams[2]]),y =  sum(ȳ_positions[3,beams[2]]),ϕ = sum(ȳ_positions[1,beams[2]])))
                 
