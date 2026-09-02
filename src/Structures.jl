@@ -329,7 +329,7 @@ function (str::Structure)(x::AbstractArray{T,2},beams::NamedTuple,nodes::NamedTu
                 EnsembleThreads(),
                 reltol = 1e-6,abstol = 1e-6,#saveat = 0.01,
                 save_start = true,save_on = v,save_end = true,
-                sensealg=str.SensAlg,
+                sensealg=str.SensAlg,verbose=DEVerbosity(SciMLLogging.None()),
                 trajectories = length(beams)
                 )
 

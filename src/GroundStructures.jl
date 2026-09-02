@@ -36,7 +36,7 @@ function (str::GroundStructure)(x::AbstractMatrix{T},beamtpl::NamedTuple,nodetpl
                 EnsembleThreads(),
                 reltol = 1e-6,abstol = 1e-6,
                 save_start = true,save_on = plt,save_end = true,
-                sensealg=str.SensAlg,
+                sensealg=str.SensAlg,verbose=DEVerbosity(SciMLLogging.None()),
                 trajectories = cbeams
                 )
 

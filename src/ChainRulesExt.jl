@@ -733,14 +733,14 @@ function CRC.rrule(str::Structure,x::AbstractArray{T,N},beams::NamedTuple{beamna
     ensprob = EnsembleProblem(prob;prob_func = prob_func,
                                 output_func = output_function_,
                                 reduction = reduction_funcF!,
-                                u_init = out,
+                                u_init = out
                               )
 
     solve(ensprob,str.Solver,
                 EnsembleThreads(),
                 save_on = false,save_start=true,save_end = true,
                 reltol = 1e-6,abstol = 1e-6,
-                trajectories = length(beams) 
+                trajectories = length(beams),verbose=DEVerbosity(SciMLLogging.None()),
                 )
  
     function back_ode(ȳ)
@@ -767,6 +767,7 @@ function CRC.rrule(str::Structure,x::AbstractArray{T,N},beams::NamedTuple{beamna
                     EnsembleThreads(),
                     save_on = false,save_start=true,save_end = true,
                     reltol = 1e-6,abstol = 1e-6,
+                    verbose=DEVerbosity(SciMLLogging.None()),
                     trajectories = length(beams)
                     )
         
@@ -826,6 +827,7 @@ function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},beams::NamedTuple{b
 
     sol = solve(ensprob,str.Solver,
                 EnsembleThreads(),
+                verbose=DEVerbosity(SciMLLogging.None()),
                 reltol = 1e-6,abstol = 1e-6,
                 save_on = false,save_start=true,save_end = true,
                 trajectories = cbeams
@@ -852,6 +854,7 @@ function CRC.rrule(str::GroundStructure,x::AbstractMatrix{T},beams::NamedTuple{b
         solp = solve(ensprob,str.Solver,
                     EnsembleThreads(),
                     reltol = 1e-6,abstol = 1e-6,
+                    verbose=DEVerbosity(SciMLLogging.None()),
                     save_on = false,save_start=false,save_end = true,
                     trajectories = cbeams
                     )

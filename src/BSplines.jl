@@ -20,7 +20,7 @@ end
 splinefunc = ODEFunction{true}(splineode!)
 splineprob = ODEProblem(splinefunc,zero(Float32),(0f0,1f0))
 #get angle at end of beam for given control points and initial curvature
-get_θe(θs,κ0) = solve(splineprob,Tsit5(),u0 = [θs],dt = 1e-6, p=κ0,reltol=1f-6,abstol=1f-6).u[end][end]
+get_θe(θs,κ0) = solve(splineprob,Tsit5(),u0 = [θs],dt = 1.5e-6, p=κ0,reltol=1f-6,abstol=1f-6,verbose=DEVerbosity(SciMLLogging.None())).u[end][end]
 
 # function multiply_knots(t::T,N,p,i) where{T} 
 #     iszero(N)  &&  return zero(T)

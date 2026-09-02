@@ -2,7 +2,7 @@ module BeamStructures
 
     using LinearAlgebra
     using Statistics
-    using DifferentialEquations
+    using OrdinaryDiffEq
     using NonlinearSolve
     using Zygote
     using SciMLSensitivity
