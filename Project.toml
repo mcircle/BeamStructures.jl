@@ -1,6 +1,6 @@
 name = "BeamStructures"
 uuid = "44f7160b-5d2f-475a-9a6c-c0abac920fd9"
-version = "0.1.63"
+version = "0.1.65"
 authors = ["MCircle <marten.zirkel@tu-ilmenau.com>"]
 
 [deps]
