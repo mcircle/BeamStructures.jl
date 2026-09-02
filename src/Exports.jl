@@ -251,7 +251,6 @@ using GeometryBasics,Dates
 
 
 using BSplineKit, StaticArrays, LinearAlgebra, Gmsh
-using DifferentialEquations
 
 # ─────────────────────────────────────────────────────────
 # 1. Glatte neutrale Faser aus ODESolution
