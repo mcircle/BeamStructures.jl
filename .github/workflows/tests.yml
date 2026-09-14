@@ -1,0 +1,23 @@
+name: Package tests
+on:
+  push:
+    branches: [master, "test/**"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.11'
+      - uses: julia-actions/cache@v2
+      - name: Resolve and test package
+        shell: julia --project=. {0}
+        run: |
+          using Pkg
+          Pkg.resolve()
+          Pkg.test()
