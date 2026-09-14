@@ -36,7 +36,7 @@ for T in (Float32, Float64)
             passed = false
         end
         push!(rows, (method="1", check="beam_rhs_adjoint", datatype=string(T), seed=seed,
-                     e..., passed))
+                     e..., passed=passed))
 
         # End-state gradients: ForwardDiff through the forward ODE versus
         # the package's backward adjoint ODE. Fixed steps avoid adaptive-path noise.
