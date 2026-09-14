@@ -1,0 +1,14 @@
+seeds = [11, 29, 47]
+thresholds = [0.3, 0.5, 0.7]
+max_enumerated_edges = 6
+# SI displacement samples. Change together with the case adapter.
+optimization_points = [-0.002, 0.0, 0.002]
+evaluation_points = [-0.002, -0.001, 0.0, 0.001, 0.002]
+
+[Float32]
+atol = 1e-5
+rtol = 2e-5
+
+[Float64]
+atol = 1e-10
+rtol = 1e-9
