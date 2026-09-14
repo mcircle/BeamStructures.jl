@@ -19,5 +19,7 @@ jobs:
         shell: julia --project=. {0}
         run: |
           using Pkg
+          Pkg.Registry.add("General")
+          Pkg.instantiate()
           Pkg.resolve()
           Pkg.test()
