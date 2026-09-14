@@ -13,13 +13,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
-          version: '1.11'
+          version: '1.12.1'
       - uses: julia-actions/cache@v2
       - name: Resolve and test package
         shell: julia --project=. {0}
         run: |
           using Pkg
           Pkg.Registry.add("General")
-          Pkg.instantiate()
           Pkg.resolve()
+          Pkg.instantiate()
           Pkg.test()
+      - name: Set up validation environment
+        run: julia validation/setup.jl
+      - name: Run numerical validation
+        run: julia --project=validation validation/run.jl validation/results/ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-results
+          path: validation/results/ci
+          if-no-files-found: ignore

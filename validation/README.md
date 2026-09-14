@@ -2,7 +2,7 @@
 
 ## Start
 
-Aus dem Repository:
+Mit Julia 1.12 (CI: 1.12.1, passend zum Repository-Manifest), aus dem Repository:
 
 ```sh
 julia validation/setup.jl
