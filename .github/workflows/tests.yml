@@ -1,14 +1,17 @@
 name: Package tests
 on:
   push:
-    branches: [master, "test/**"]
+    branches: [master]
   pull_request:
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+      BEAM_VALIDATION_OUTPUT: validation/results/ci
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -23,10 +26,6 @@ jobs:
           Pkg.resolve()
           Pkg.instantiate()
           Pkg.test()
-      - name: Set up validation environment
-        run: julia validation/setup.jl
-      - name: Run numerical validation
-        run: julia --project=validation validation/run.jl validation/results/ci
       - uses: actions/upload-artifact@v4
         if: always()
         with:

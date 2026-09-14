@@ -70,7 +70,9 @@ function record_environment(directory; settings=Dict())
     open(joinpath(directory, "metadata.toml"), "w") do io
         TOML.print(io, data)
     end
-    manifest = joinpath(@__DIR__, "Manifest.toml")
+    active_project = Base.active_project()
+    manifest = isnothing(active_project) ? joinpath(@__DIR__, "Manifest.toml") :
+               joinpath(dirname(active_project), "Manifest.toml")
     isfile(manifest) && cp(manifest, joinpath(directory, "Manifest.toml"); force=true)
 end
 

@@ -4,7 +4,9 @@ import ForwardDiff, Zygote
 include("Validation.jl")
 using .Validation
 
-output = length(ARGS) >= 1 ? abspath(ARGS[1]) : joinpath(@__DIR__, "results", string(time_ns()))
+output = get(ENV, "BEAM_VALIDATION_OUTPUT",
+    length(ARGS) >= 1 ? abspath(ARGS[1]) : joinpath(@__DIR__, "results", string(time_ns())))
+output = isabspath(output) ? output : joinpath(@__DIR__, "..", output)
 mkpath(output)
 settings = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
 record_environment(output; settings)

@@ -9,3 +9,8 @@ include("effective_properties.jl")
 
 include("beam_derivatives.jl")
 include("validation_environment.jl")
+
+# Use the resolved Pkg.test environment instead of resolving/precompiling it again.
+module NumericalValidationSmoke
+include(joinpath(@__DIR__, "..", "validation", "run.jl"))
+end
