@@ -348,6 +348,7 @@ function jac(t::AbstractArray{T,N},p::SciMLBase.NullParameters,s) where{T,N} #ja
 end 
 
 function jac!(dt,t::AbstractArray{T,N},p,s) where{T,N} #jacobi 
+    fill!(dt, zero(eltype(dt)))
     
     @inbounds     m,θ,x,y,fx,fy,κ = t
     @inbounds     s,c = sincos(θ)
@@ -363,6 +364,7 @@ function jac!(dt,t::AbstractArray{T,N},p,s) where{T,N} #jacobi
 end
 
 function vjp_beam!(Jv,λ::AbstractArray{T,N},u::AbstractVector,t) where{T,N} #vjp
+    fill!(Jv, zero(eltype(Jv)))
     @inbounds begin
         δm,δθ,δx,δy,δfx,δfy,_= λ
         m,θ,x,y,fx,fy,_ = u
@@ -377,6 +379,7 @@ function vjp_beam!(Jv,λ::AbstractArray{T,N},u::AbstractVector,t) where{T,N} #vj
 end
 
 function vjp_curved_beam!(Jv,λ::AbstractArray{T,N},u::AbstractVector,t) where{T,N} #vjp
+    fill!(Jv, zero(eltype(Jv)))
     @inbounds begin
         δm,δθ,δx,δy,δfx,δfy = λ
         m,θ,x,y,fx,fy,_ = u
@@ -388,6 +391,15 @@ function vjp_curved_beam!(Jv,λ::AbstractArray{T,N},u::AbstractVector,t) where{T
 
     end  
     return nothing 
+end
+
+# Each column is an independent adjoint plus its forward state.
+function vjp!(Jv::AbstractMatrix, lambda::AbstractMatrix,
+              p::SciMLBase.NullParameters, t)
+    for j in axes(lambda, 2)
+        vjp!(view(Jv, :, j), view(lambda, :, j), p, t)
+    end
+    return nothing
 end
 
 function vjp!(Jv,λ::AbstractArray{T,N},p::SciMLBase.NullParameters,t) where{T,N} #vjp

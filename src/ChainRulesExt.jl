@@ -922,26 +922,39 @@ function CRC.rrule(::typeof(admittance_matrix),solfw::AbstractArray{T,N},adj,str
     ad,admittance_back
 end 
 
-function CRC.rrule(::typeof(effective_stiffness),k::AbstractMatrix{T},u) where{T}
-    nomoveidcs = [u[1]...]
-    moveables = [u[2]...]
-    ids = setdiff(axes(k,1),nomoveidcs)
-    ke = @view k[ids,ids]
-    f = zeros(T,size(k,1))
-    f[moveables] .= [one(T)]
-    mov = ke \ f[ids]
-    
-    e_out = mov' * ke * mov
-    function compute_energy_pullback(Δenergy)
-        Δ_dot = CRC.unthunk(Δenergy)
-        # Zurück in volle Matrix
-        Δ_k = zero(k)
-        Δ_k[ids, ids] .= - Δ_dot * mov * mov' 
-        
-        return CRC.NoTangent(),Δ_k, NoTangent()
+function CRC.rrule(::typeof(effective_compliance),
+                   k::AbstractMatrix{T}, dofs::Pair) where {T<:Real}
+    ids, ke, f = _compliance_system(k, dofs)
+    displacement = ke \ f
+    compliance = dot(f, displacement)
+    project_k = CRC.ProjectTo(k)
+
+    function compliance_pullback(cotangent)
+        dc = CRC.unthunk(cotangent)
+        dc isa CRC.AbstractZero &&
+            return (CRC.NoTangent(), CRC.ZeroTangent(), CRC.NoTangent())
+        # A separate transpose solve is essential for nonsymmetric matrices.
+        adjoint_displacement = transpose(ke) \ f
+        dk = zeros(eltype(displacement), size(k))
+        dk[ids, ids] .= -dc .* (adjoint_displacement * transpose(displacement))
+        return CRC.NoTangent(), project_k(dk), CRC.NoTangent()
     end
-    e_out,compute_energy_pullback
-end 
+    return compliance, compliance_pullback
+end
+
+function CRC.rrule(::typeof(effective_stiffness),
+                   k::AbstractMatrix{T}, dofs::Pair) where {T<:Real}
+    compliance, compliance_back = CRC.rrule(effective_compliance, k, dofs)
+    iszero(compliance) && throw(DomainError(compliance, "zero compliance has no finite reciprocal"))
+    stiffness = inv(compliance)
+    function stiffness_pullback(cotangent)
+        ds = CRC.unthunk(cotangent)
+        ds isa CRC.AbstractZero &&
+            return (CRC.NoTangent(), CRC.ZeroTangent(), CRC.NoTangent())
+        return compliance_back(-ds * stiffness^2)
+    end
+    return stiffness, stiffness_pullback
+end
 
 function CRC.rrule(::typeof(changenode),bn,nodes,nt)
     bn_out = changenode(bn,nodes,nt)
