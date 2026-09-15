@@ -220,7 +220,7 @@ function CRC.rrule(::typeof(normvector), b::B) where{T,B<:BeamElement{T}}
     y = normfactor_m(b)
 
     pullback_norm(ȳ) = pullback_normvector(ȳ,b,y)
-    return y .* [b.l,b.l^2,b.l^2], pullback_norm
+    return y .* [one(T),b.l,b.l], pullback_norm
 end
 
 function pullback_scaleforce(ȳ,y,b,::Val{false})
@@ -963,4 +963,3 @@ function CRC.rrule(::typeof(changenode),bn,nodes,nt)
     end 
     return bn_out,changenodeback
 end
-
