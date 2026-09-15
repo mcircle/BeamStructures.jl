@@ -44,11 +44,11 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             name="fixture",
             scales=(1.0, 1.0, 1.0),
             target=points -> hcat(points, zero(points), zero(points)),
-            initial=(topology, rng) -> [2.0],
+            initial=(topology, rng) -> (value=[2.0],),
             optimize=(topology, parameters) ->
-                (parameters=[1.0], converged=true, residual=0.0),
+                (parameters=(value=[1.0],), converged=true, residual=0.0),
             evaluate=(topology, parameters, points) ->
-                hcat(parameters[1].*points, zero(points), zero(points)),
+                hcat(parameters.value[1].*points, zero(points), zero(points)),
             method2=rng -> (mask=fixed_mask, converged=true, residual=0.0))
 
         rows = TopologyEvaluation.optimize_topologies(selected, case;
@@ -71,6 +71,13 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             directory, name=case.name)
         @test all(row -> row.gap == 0, comparison)
         @test all(row -> row.frequency == 3, comparison)
+
+        TopologyEvaluation.write_study_inputs(selected, (case,),
+            [-1.0, 0.0, 1.0], directory)
+        @test countlines(joinpath(directory, "topology_catalog.csv")) == 3
+        target_path = joinpath(directory, "fixture_target.csv")
+        @test countlines(target_path) == 4
+        @test first(readlines(target_path)) == "point,Fx,Fy,Mz"
     end
 end
 
@@ -96,4 +103,47 @@ end
     @test all(iszero, diag(adjacency))
     @test adjacency[2, 1] == weights[1]
     @test adjacency[5, 4] == weights[end]
+
+    parameters = initial_parameters(MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0])
+    @test keys(parameters.nodes) == NODE_NAMES
+    @test keys(parameters.beams) == BEAM_NAMES
+    @test parameters.nodes.Node_1 isa BS.Clamp
+    @test parameters.nodes.Node_2 isa BS.Clamp
+    @test parameters.nodes.Node_3 isa BS.Branch
+    @test parameters.nodes.Node_4 isa BS.Branch
+    @test parameters.nodes.Node_5 isa BS.Clamp
+    @test size(parameters.states) == (3, 12, 3)
+
+    beam = parameters.beams.Beam_1
+    beam_vector = Float32[beam...]
+    for fun in (BS.normfactor_m, BS.normfactor_f)
+        value, pullback = CRC.rrule(fun, beam)
+        @test value ≈ fun(beam)
+        _, dbeam = pullback(0.7f0)
+        expected = ForwardDiff.gradient(
+            values -> 0.7f0 * fun(BS.Beam(values...)), beam_vector)
+        @test Float32[dbeam.l, dbeam.h, dbeam.w, dbeam.E] ≈
+              expected[[1, 2, 3, 5]] rtol=2f-5
+    end
+    norm_seed = Float32[0.2, -0.3, 0.4]
+    norm_value, norm_pullback = CRC.rrule(BS.normvector, beam)
+    @test norm_value ≈ BS.normvector(beam)
+    _, dbeam = norm_pullback(norm_seed)
+    expected = ForwardDiff.gradient(values ->
+        dot(norm_seed, BS.normvector(BS.Beam(values...))), beam_vector)
+    @test Float32[dbeam.l, dbeam.h, dbeam.w, dbeam.E] ≈
+          expected[[1, 2, 3, 5]] rtol=2f-5
+
+    # Exercise the same separate-argument Zygote path used by the study.
+    smoke_points = Float32[0]
+    smoke = initial_parameters(MersenneTwister(9), smoke_points)
+    model = BS.GroundStructure()
+    target = target_characteristic(:linear_progressive, smoke_points)
+    value, gradients = Zygote.withgradient(
+        (beams, nodes, states) -> study_loss(model, beams, nodes, states,
+            ones(Float32, 10), smoke_points, target,
+            (10.0f0, 10.0f0, 1000.0f0), 1.0f0),
+        smoke.beams, smoke.nodes, smoke.states)
+    @test isfinite(value)
+    @test length(gradients) == 3
 end
