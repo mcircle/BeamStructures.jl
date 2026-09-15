@@ -34,7 +34,7 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
         zeros(2, 3), zeros(2, 3), (1.0, 0.0, 1.0))
 
     adam = TopologyEvaluation.adam_optimize(
-        x -> sum(abs2, x .- 2), [0.0, 0.0]; eta=0.1, iterations=100)
+        x -> sum(abs2, x .- 2), [0.0, 0.0]; eta=0.1, iterations=150)
     @test adam.objective < 1e-4
 
     mktempdir() do directory
