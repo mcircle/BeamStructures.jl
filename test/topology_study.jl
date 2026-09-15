@@ -44,11 +44,11 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             name="fixture",
             scales=(1.0, 1.0, 1.0),
             target=points -> hcat(points, zero(points), zero(points)),
-            initial=(topology, rng) -> [2.0],
+            initial=(topology, rng) -> (value=[2.0],),
             optimize=(topology, parameters) ->
-                (parameters=[1.0], converged=true, residual=0.0),
+                (parameters=(value=[1.0],), converged=true, residual=0.0),
             evaluate=(topology, parameters, points) ->
-                hcat(parameters[1].*points, zero(points), zero(points)),
+                hcat(parameters.value[1].*points, zero(points), zero(points)),
             method2=rng -> (mask=fixed_mask, converged=true, residual=0.0))
 
         rows = TopologyEvaluation.optimize_topologies(selected, case;

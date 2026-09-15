@@ -85,7 +85,7 @@ function optimize_topologies(topologies, case; seeds, points, directory)
             before = case.evaluate(topology, initial, points)
             initial_metric = curve_metrics(before, target, case.scales)
             result = nothing
-            elapsed = @elapsed result = case.optimize(topology, copy(initial))
+            elapsed = @elapsed result = case.optimize(topology, deepcopy(initial))
             actual = case.evaluate(topology, result.parameters, points)
             all(isfinite, actual) || error("non-finite characteristic")
             metric = curve_metrics(actual, target, case.scales)
