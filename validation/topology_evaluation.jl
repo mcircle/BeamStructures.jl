@@ -1,11 +1,28 @@
 module TopologyEvaluation
 
 using Random, Statistics
+using Optimisers, Zygote
 using ..Validation: errors, write_rows
 using ..TopologyGeneration: topology_id
 
 export curve_metrics, optimize_topologies, summarize_topologies,
-       compare_method2, run_method2_initializations
+       compare_method2, run_method2_initializations, adam_optimize
+
+"""Optimize any Optimisers-compatible parameter tree with Adam."""
+function adam_optimize(loss, parameters; eta=1e-3, iterations=500,
+                       callback=nothing)
+    iterations >= 0 || throw(ArgumentError("iterations must be non-negative"))
+    state = Optimisers.setup(Optimisers.Adam(eta), parameters)
+    value = loss(parameters)
+    for iteration in 1:iterations
+        value, gradient = Zygote.withgradient(loss, parameters)
+        isfinite(value) || error("non-finite optimization objective")
+        state, parameters = Optimisers.update(state, parameters, only(gradient))
+        isnothing(callback) || callback(iteration, value, parameters)
+    end
+    value = loss(parameters)
+    (; parameters, objective=value)
+end
 
 function curve_metrics(actual, target, scales)
     size(actual) == size(target) || throw(DimensionMismatch("curve shape"))
@@ -35,8 +52,8 @@ Optimize every topology with method 1.
 
 The case adapter supplies:
 initial(topology, rng), optimize(topology, p0),
-evaluate(topology, parameters, points), target(points), scales, and
-volume(topology, parameters). The optimizer returns
+evaluate(topology, parameters, points), target(points), and scales. A volume
+callback is optional. The optimizer returns
 (parameters, converged, residual).
 """
 function optimize_topologies(topologies, case; seeds, points, directory)
@@ -56,8 +73,9 @@ function optimize_topologies(topologies, case; seeds, points, directory)
             all(isfinite, actual) || error("non-finite characteristic")
             metric = curve_metrics(actual, target, case.scales)
             by_name = Dict(row.component => row for row in metric.component)
-            volume = case.volume(topology, result.parameters)
-            isfinite(volume) || error("non-finite volume")
+            volume = hasproperty(case, :volume) ?
+                     case.volume(topology, result.parameters) : missing
+            ismissing(volume) || isfinite(volume) || error("non-finite volume")
             ansys_model_objective = missing
             ansys_target_objective = missing
             if hasproperty(case, :ansys)
@@ -154,13 +172,12 @@ function compare_method2(summary, method2_rows; directory, name)
     lookup = Dict(row.topology => row for row in summary)
     valid_scores = [row.best_objective for row in summary
                     if !ismissing(row.best_objective)]
-    isempty(valid_scores) && error("no valid method-1 reference result")
-    best = minimum(valid_scores)
+    best = isempty(valid_scores) ? missing : minimum(valid_scores)
     ranked = sort(unique(valid_scores))
     output = NamedTuple[]
     for row in method2_rows
         reference = get(lookup, row.topology, nothing)
-        if row.status != "converged" || isnothing(reference) ||
+        if ismissing(best) || row.status != "converged" || isnothing(reference) ||
            ismissing(reference.best_objective)
             push!(output, (seed=row.seed, topology=row.topology,
                 method2_status=row.status, found_in_reference=!isnothing(reference),
