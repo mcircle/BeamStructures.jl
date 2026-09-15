@@ -46,6 +46,17 @@ Damit entstehen `topology_catalog.csv` sowie die drei Dateien
 Die erste Spalte heißt einheitlich `point`, sodass die Kennlinien direkt mit
 `compare_ansys.jl` eingelesen werden können.
 
+Ein kurzer End-to-End-Test mit zwei Topologien, einem Seed, drei
+Auslenkungspunkten und je zwei Adam-Schritten läuft mit:
+
+```sh
+julia --project=validation validation/run_topology_smoke.jl
+```
+
+Er verwendet dieselben Modell-, Gradienten- und CSV-Pfade wie die vollständige
+Studie. Er prüft die technische Ausführbarkeit, nicht Optimierungsgüte oder
+Konvergenz.
+
 Die fünf Knoten haben fest die Rollen `Clamp, Clamp, Branch, Branch, Clamp`.
 Knoten 1 und 2 sind fest; Knoten 5 wird horizontal bewegt. Für jeden Seed
 werden fünf verschiedene ganzzahlige Positionen im 100×100-Raster gezogen.
