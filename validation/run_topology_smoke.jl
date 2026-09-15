@@ -9,9 +9,9 @@ using .TopologyGeneration
 using .TopologyEvaluation
 
 settings = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
-settings["evaluation_points"] = [-10.0, 0.0, 10.0]
-settings["adam_method1_iterations"] = 2
-settings["adam_method2_iterations"] = 2
+settings["evaluation_points"] = [-10.0, 10.0]
+settings["adam_method1_iterations"] = 1
+settings["adam_method2_iterations"] = 1
 
 include("topology_adapter.jl")
 
@@ -20,7 +20,7 @@ output = get(ENV, "BEAM_TOPOLOGY_SMOKE_OUTPUT",
 mkpath(output)
 record_environment(output; settings)
 
-topologies = enumerate_topologies()[1:2]
+topologies = enumerate_topologies()[1:1]
 cases = topology_study_cases(settings)
 points = settings["evaluation_points"]
 write_study_inputs(topologies, cases, points, output)

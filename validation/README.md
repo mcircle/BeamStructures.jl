@@ -46,8 +46,8 @@ Damit entstehen `topology_catalog.csv` sowie die drei Dateien
 Die erste Spalte heißt einheitlich `point`, sodass die Kennlinien direkt mit
 `compare_ansys.jl` eingelesen werden können.
 
-Ein kurzer End-to-End-Test mit zwei Topologien, einem Seed, drei
-Auslenkungspunkten und je zwei Adam-Schritten läuft mit:
+Ein kurzer End-to-End-Test mit einer Topologie, einem Seed, zwei
+Auslenkungspunkten und je einem Adam-Schritt läuft mit:
 
 ```sh
 julia --project=validation validation/run_topology_smoke.jl
