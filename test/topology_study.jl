@@ -96,4 +96,27 @@ end
     @test all(iszero, diag(adjacency))
     @test adjacency[2, 1] == weights[1]
     @test adjacency[5, 4] == weights[end]
+
+    parameters = initial_parameters(MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0])
+    @test keys(parameters.nodes) == NODE_NAMES
+    @test keys(parameters.beams) == BEAM_NAMES
+    @test parameters.nodes.Node_1 isa BS.Clamp
+    @test parameters.nodes.Node_2 isa BS.Clamp
+    @test parameters.nodes.Node_3 isa BS.Branch
+    @test parameters.nodes.Node_4 isa BS.Branch
+    @test parameters.nodes.Node_5 isa BS.Clamp
+    @test size(parameters.states) == (3, 12, 3)
+
+    # Exercise the same separate-argument Zygote path used by the study.
+    smoke_points = Float32[0]
+    smoke = initial_parameters(MersenneTwister(9), smoke_points)
+    model = BS.GroundStructure()
+    target = target_characteristic(:linear_progressive, smoke_points)
+    value, gradients = Zygote.withgradient(
+        (beams, nodes, states) -> study_loss(model, beams, nodes, states,
+            ones(Float32, 10), smoke_points, target,
+            (10.0f0, 10.0f0, 1000.0f0), 1.0f0),
+        smoke.beams, smoke.nodes, smoke.states)
+    @test isfinite(value)
+    @test length(gradients) == 3
 end
