@@ -21,6 +21,45 @@ metadata.toml enthält Commit, Julia-Version, Threadzahl und Einstellungen;
 das aufgelöste Manifest wird mitgesichert. Konfiguration und Einheiten vor einer
 Dissertationsstudie festlegen. Toleranzen nicht allein zum Bestehen erhöhen.
 
+## Topologiestudie auf dem 5×5-Adjazenzraum
+
+Der eingebaute Adapter benötigt keinen Platzhalterpfad:
+
+```sh
+julia --project=validation validation/run_topology_study.jl
+```
+
+Nur den Katalog der zulässigen Topologien erzeugt:
+
+```sh
+julia --project=validation validation/run_topology_study.jl --catalog-only
+```
+
+Die fünf Knoten haben fest die Rollen `Clamp, Clamp, Branch, Branch, Clamp`.
+Knoten 1 und 2 sind fest; Knoten 5 wird horizontal bewegt. Für jeden Seed
+werden fünf verschiedene ganzzahlige Positionen im 100×100-Raster gezogen.
+Ein Seed verwendet über sämtliche festen Topologien dieselbe Startgeometrie.
+
+Die Auslenkung läuft von -10 mm bis +10 mm. Es werden drei Sollkennlinien mit
+`ξ = Δx / 10 mm` und der Kraftskala `F0` ausgewertet:
+
+- linear-progressiv: `Fx/F0 = 0.65ξ + 0.35ξ³`
+- Sattelpunkt: `Fx/F0 = 1.5ξ - 0.5ξ³`
+- Tal/negative Steifigkeit: `Fx/F0 = ξ³ - 0.55ξ`
+
+`Fy` und `Mz` sind jeweils null. Methode 1 optimiert jede graphisch zulässige
+binäre Adjazenzmatrix. Methode 2 optimiert kontinuierliche Kantenwerte und
+diskretisiert sie anschließend mit dem konfigurierten Schwellwert. Beide Wege
+verwenden `Optimisers.Adam`; Iterationszahl, Lernrate, Gleichgewichtsgewicht,
+Kraftskala und Schwellwert stehen in `config.toml`. Das Volumen wird weder
+berechnet noch bewertet.
+
+Im Ergebnisordner liegen `topology_catalog.csv` sowie je Kennlinie
+`*_target.csv`, `*_method1_runs.csv`, `*_topology_summary.csv`,
+`*_method2_runs.csv` und `*_method2_comparison.csv`. Bei einem nicht
+konvergierten Referenzlauf bleiben die Vergleichswerte leer, statt den gesamten
+Versuch abzubrechen.
+
 ## Eigene Optimierungsfälle
 
 ```sh
@@ -114,3 +153,4 @@ julia --project=validation validation/compare_ansys.jl model.csv ansys.csv error
 
 Es werden keine erfundenen Ansys-Daten mitgeliefert. Fehlende FE-Daten gelten
 nicht als bestandene Validierung.
+

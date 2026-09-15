@@ -1,7 +1,9 @@
 module TopologyGeneration
 
+using Random
+
 export candidate_edges, adjacency_matrix, topology_id, is_admissible,
-       enumerate_topologies
+       enumerate_topologies, random_node_positions
 
 candidate_edges(n::Integer) = [(j, i) for i in 1:n-1 for j in i+1:n]
 
@@ -40,8 +42,8 @@ All clamp nodes must share one component. A branch may be unused (degree zero);
 an active branch must belong to the clamp component and have at least
 `minimum_branch_degree` incident beams.
 """
-function is_admissible(mask; n=5, clamp_nodes=(1, 2, 3),
-                       branch_nodes=(4, 5), minimum_branch_degree=2)
+function is_admissible(mask; n=5, clamp_nodes=(1, 2, 5),
+                       branch_nodes=(3, 4), minimum_branch_degree=2)
     sort!(collect((clamp_nodes..., branch_nodes...))) == collect(1:n) ||
         throw(ArgumentError("clamp_nodes and branch_nodes must partition 1:n"))
     adjacency = adjacency_matrix(mask, n)
@@ -60,8 +62,8 @@ end
 Enumerate all graph-level admissible binary topologies in deterministic order.
 For n=5 this examines all 2^10 = 1024 masks.
 """
-function enumerate_topologies(; n=5, clamp_nodes=(1, 2, 3),
-                              branch_nodes=(4, 5),
+function enumerate_topologies(; n=5, clamp_nodes=(1, 2, 5),
+                              branch_nodes=(3, 4),
                               minimum_branch_degree=2)
     edges = candidate_edges(n)
     topologies = NamedTuple[]
@@ -75,6 +77,26 @@ function enumerate_topologies(; n=5, clamp_nodes=(1, 2, 3),
                            degrees=vec(sum(adjacency; dims=1))))
     end
     topologies
+end
+
+"""
+    random_node_positions(rng; n=5, gridsize=100)
+
+Draw `n` distinct integer node positions from the square grid
+`0:gridsize × 0:gridsize`. Passing an explicit random-number generator makes
+the geometry reproducible and lets every topology use the same geometry for a
+given seed.
+"""
+function random_node_positions(rng::AbstractRNG; n=5, gridsize=100)
+    n > 0 || throw(ArgumentError("n must be positive"))
+    gridsize >= 0 || throw(ArgumentError("gridsize must be non-negative"))
+    available = (gridsize + 1)^2
+    n <= available || throw(ArgumentError("grid contains fewer than n points"))
+    linear = randperm(rng, available)[1:n] .- 1
+    positions = Matrix{Float64}(undef, 2, n)
+    positions[1, :] .= linear .% (gridsize + 1)
+    positions[2, :] .= linear .÷ (gridsize + 1)
+    positions
 end
 
 end
