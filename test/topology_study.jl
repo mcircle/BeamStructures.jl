@@ -107,6 +107,26 @@ end
     @test parameters.nodes.Node_5 isa BS.Clamp
     @test size(parameters.states) == (3, 12, 3)
 
+    beam = parameters.beams.Beam_1
+    beam_vector = Float32[beam...]
+    for fun in (BS.normfactor_m, BS.normfactor_f)
+        value, pullback = CRC.rrule(fun, beam)
+        @test value ≈ fun(beam)
+        _, dbeam = pullback(0.7f0)
+        expected = ForwardDiff.gradient(
+            values -> 0.7f0 * fun(BS.Beam(values...)), beam_vector)
+        @test Float32[dbeam.l, dbeam.h, dbeam.w, dbeam.E] ≈
+              expected[[1, 2, 3, 5]] rtol=2f-5
+    end
+    norm_seed = Float32[0.2, -0.3, 0.4]
+    norm_value, norm_pullback = CRC.rrule(BS.normvector, beam)
+    @test norm_value ≈ BS.normvector(beam)
+    _, dbeam = norm_pullback(norm_seed)
+    expected = ForwardDiff.gradient(values ->
+        dot(norm_seed, BS.normvector(BS.Beam(values...))), beam_vector)
+    @test Float32[dbeam.l, dbeam.h, dbeam.w, dbeam.E] ≈
+          expected[[1, 2, 3, 5]] rtol=2f-5
+
     # Exercise the same separate-argument Zygote path used by the study.
     smoke_points = Float32[0]
     smoke = initial_parameters(MersenneTwister(9), smoke_points)

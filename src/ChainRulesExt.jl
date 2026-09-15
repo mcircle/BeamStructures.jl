@@ -170,26 +170,23 @@ end
 
 function CRC.rrule(::typeof(normfactor_m), b::B) where{T,B<:BeamElement{T}}
     nf = normfactor(b)
-    pullback_norm_m(ȳ) = pullback_normfactor_m(ȳ,b,nf)  
-    return nf, pullback_norm_m
+    pullback_norm_m(ȳ) = pullback_normfactor_m(ȳ,b,nf)
+    return b.l * nf, pullback_norm_m
 end
 
 function pullback_normfactor_f(ȳ,b::B) where{T,B<:BeamElement{T}}
-    ∂m = b.l * ȳ 
-    fm, pb_m = CRC.rrule(normfactor_m, b)
-    _, ∂b_m = pb_m(∂m)
-    
+    nf = normfactor_f(b)
     ∂b = Tangent{B}(;
-        l = 2 * ∂b_m.l,
-        h =  ∂b_m.h ,
-        w =  ∂b_m.w ,
-        E =  -∂b_m.E 
+        l = 2 * ȳ * nf / b.l,
+        h = -3 * ȳ * nf / b.h,
+        w = -ȳ * nf / b.w,
+        E = -ȳ * nf / b.E,
     )
     return (NoTangent(), ∂b)
 end
 
-function CRC.rrule(::typeof(normfactor_f), b::BeamElement{T}) where{T}
-    y = normfactor(b)
+function CRC.rrule(::typeof(normfactor_f), b::B) where{T,B<:BeamElement{T}}
+    y = normfactor_f(b)
     pullback_norm_f(ȳ) = pullback_normfactor_f(ȳ,b)
     return y, pullback_norm_f
 end
@@ -222,7 +219,7 @@ end
 function CRC.rrule(::typeof(normvector), b::B) where{T,B<:BeamElement{T}}
     y = normfactor_m(b)
 
-    pullback_norm(ȳ) = pullback_normfactor(ȳ,b,y)
+    pullback_norm(ȳ) = pullback_normvector(ȳ,b,y)
     return y .* [b.l,b.l^2,b.l^2], pullback_norm
 end
 
@@ -966,3 +963,4 @@ function CRC.rrule(::typeof(changenode),bn,nodes,nt)
     end 
     return bn_out,changenodeback
 end
+
