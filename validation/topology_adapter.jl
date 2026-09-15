@@ -101,12 +101,22 @@ end
 
 function study_loss(model, beams, nodes, states, weights, points, target,
                     scales, residual_weight, discreteness_weight=0.0)
-    result = response(model, beams, nodes, states, weights, points)
-    characteristic = mean(abs2,
-        (result[1] .- target) ./ reshape(collect(scales), 1, :))
+    adjacency = weighted_adjacency(weights)
+    loss = zero(eltype(states))
+    for index in eachindex(points)
+        displaced_nodes = moved_nodes(nodes, points[index])
+        solutions, solved_beams, solved_nodes = model(
+            states[:, :, index], beams, displaced_nodes, adjacency)
+        residual = zeros(eltype(solutions), size(states, 1), size(states, 2))
+        TopologyBS.residuals!(residual, adjacency, solutions,
+                               solved_beams, solved_nodes)
+        reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
+        characteristic = mean(abs2,
+            (reaction .- view(target, index, :)) ./ collect(scales))
+        loss += characteristic + residual_weight * mean(abs2, residual)
+    end
     discreteness = mean(abs2, weights .* (one(eltype(weights)) .- weights))
-    characteristic + residual_weight * result[2]^2 +
-        discreteness_weight * discreteness
+    loss / length(points) + discreteness_weight * discreteness
 end
 
 function initial_parameters(rng, points)
