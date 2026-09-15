@@ -9,7 +9,6 @@ include("effective_properties.jl")
 
 include("beam_derivatives.jl")
 include("validation_environment.jl")
-include("topology_cases.jl")
 include("topology_study.jl")
 
 # Use the resolved Pkg.test environment instead of resolving/precompiling it again.
