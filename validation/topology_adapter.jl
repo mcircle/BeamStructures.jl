@@ -6,6 +6,12 @@ const NODE_COUNT = 5
 const CLAMP_NODES = (1, 2, 5)
 const BRANCH_NODES = (3, 4)
 const MOVED_NODE = 5
+const EDGE_LIST = Tuple(candidate_edges(NODE_COUNT))
+const EDGE_INDEX = [i == j ? 0 :
+    findfirst(==((max(i, j), min(i, j))), EDGE_LIST)
+    for i in 1:NODE_COUNT, j in 1:NODE_COUNT]
+const EDGE_BASIS = cat((Float32.(EDGE_INDEX .== edge)
+                        for edge in eachindex(EDGE_LIST))...; dims=3)
 const BEAM_NAMES = ntuple(i -> Symbol("Beam_", i), 10)
 const NODE_NAMES = ntuple(i -> Symbol("Node_", i), NODE_COUNT)
 
@@ -30,10 +36,7 @@ function target_characteristic(kind::Symbol, displacements; force_scale=10.0)
 end
 
 function weighted_adjacency(weights)
-    edges = candidate_edges(NODE_COUNT)
-    [i == j ? zero(eltype(weights)) :
-     weights[findfirst(==((max(i, j), min(i, j))), edges)]
-     for i in 1:NODE_COUNT, j in 1:NODE_COUNT]
+    dropdims(sum(reshape(weights, 1, 1, :) .* EDGE_BASIS; dims=3); dims=3)
 end
 
 """Construct node names directly, avoiding the ambiguous internal getnames call."""
@@ -51,7 +54,7 @@ end
 """Construct the ten ground-structure beams without BeamStructures.prepare."""
 function make_beams(positions::AbstractMatrix{T}, rng::AbstractRNG;
                     height=T(1), width=T(5), youngs_modulus=T(2.1e5)) where {T}
-    values = map(candidate_edges(NODE_COUNT)) do (j, i)
+    values = map(EDGE_LIST) do (j, i)
         dx = positions[1, j] - positions[1, i]
         dy = positions[2, j] - positions[2, i]
         chord = hypot(dx, dy)
@@ -214,7 +217,7 @@ function topology_study_case(kind, settings)
     end
     method2 = function(rng)
         parameters = initial_parameters(rng, points)
-        raw_weights = randn(rng, Float32, length(candidate_edges(NODE_COUNT)))
+        raw_weights = randn(rng, Float32, length(EDGE_LIST))
         result = optimize_relaxed(model, parameters, raw_weights, points, target,
             scales, residual_weight, Float32(settings["discreteness_weight"]);
             eta=Float32(settings["adam_method2_eta"]),
