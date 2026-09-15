@@ -91,21 +91,21 @@ function response(model, beams, nodes, states, weights, displacements)
         TopologyBS.residuals!(residual, adjacency, solutions,
                                solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
-        (; reaction, residual)
+        (reaction, residual)
     end
-    actual = reduce(vcat, (permutedims(sample.reaction) for sample in samples))
+    actual = reduce(vcat, (permutedims(sample[1]) for sample in samples))
     residual = sqrt(mean(abs2, reduce(vcat,
-        (vec(sample.residual) for sample in samples))))
-    (; actual, residual)
+        (vec(sample[2]) for sample in samples))))
+    (actual, residual)
 end
 
 function study_loss(model, beams, nodes, states, weights, points, target,
                     scales, residual_weight, discreteness_weight=0.0)
     result = response(model, beams, nodes, states, weights, points)
     characteristic = mean(abs2,
-        (result.actual .- target) ./ reshape(collect(scales), 1, :))
+        (result[1] .- target) ./ reshape(collect(scales), 1, :))
     discreteness = mean(abs2, weights .* (one(eltype(weights)) .- weights))
-    characteristic + residual_weight * result.residual^2 +
+    characteristic + residual_weight * result[2]^2 +
         discreteness_weight * discreteness
 end
 
@@ -193,14 +193,14 @@ function topology_study_case(kind, settings)
                      states=result.states)
         (; parameters=optimized,
            converged=isfinite(result.objective) &&
-                     final.residual <= settings["topology_residual_limit"],
-           residual=final.residual)
+                     final[2] <= settings["topology_residual_limit"],
+           residual=final[2])
     end
     evaluate = (topology, parameters, evaluation_points) -> begin
         Float32.(evaluation_points) == points ||
             throw(ArgumentError("adapter evaluates the configured displacement grid"))
         response(model, parameters.beams, parameters.nodes, parameters.states,
-                 Float32.(topology.mask), points).actual
+                 Float32.(topology.mask), points)[1]
     end
     method2 = function(rng)
         parameters = initial_parameters(rng, points)
@@ -213,8 +213,8 @@ function topology_study_case(kind, settings)
                          result.weights, points)
         (; mask=result.weights .>= settings["topology_threshold"],
            converged=isfinite(result.objective) &&
-                     final.residual <= settings["topology_residual_limit"],
-           residual=final.residual)
+                     final[2] <= settings["topology_residual_limit"],
+           residual=final[2])
     end
 
     (name=String(kind), node_count=NODE_COUNT, clamp_nodes=CLAMP_NODES,
