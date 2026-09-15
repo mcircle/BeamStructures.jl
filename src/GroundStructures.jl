@@ -127,19 +127,55 @@ function reduction_func_admittance_!((u,data_out),data,I,solfw,adj,beams)
     reduction_func_admittance!(u,data,I,solfw,adj,beams)
     [u,append!(data_out,data)],false
 end 
-# AV being the indices of the non-moveable nodes, 
-# [1,2,3] => [ϕ,x,y] of node 1 for example 
-# AB being the indices of the moveable nodes
-function effective_stiffness(k::AbstractMatrix{T},u::Pair{AV,AB}) where{T,AV,AB}
-    nomoveidcs = [u[1]...]
-    moveables = [u[2]...]
-    ids = setdiff(axes(k,1),nomoveidcs)
-    ke = @view k[ids,ids]
-    f = zeros(T,size(k,1))
-    u = zero(f)
-    f[moveables] .= [1]
-    u[ids] .= ke\f[ids]
-    u' * k * u
+# DOFs use the per-node ordering (ϕ, x, y).
+function _compliance_system(k::AbstractMatrix{T}, dofs::Pair) where {T<:Real}
+    Base.require_one_based_indexing(k)
+    size(k, 1) == size(k, 2) || throw(DimensionMismatch("k must be square"))
+    fixed, loaded = collect(first(dofs)), collect(last(dofs))
+    isempty(loaded) && throw(ArgumentError("at least one loaded DOF is required"))
+    for indices in (fixed, loaded)
+        all(i -> i isa Integer && 1 <= i <= size(k, 1), indices) ||
+            throw(ArgumentError("DOFs must be integer indices within k"))
+        allunique(indices) || throw(ArgumentError("DOFs must not contain duplicates"))
+    end
+    isempty(intersect(fixed, loaded)) ||
+        throw(ArgumentError("loaded DOFs must not be fixed"))
+    ids = setdiff(axes(k, 1), fixed)
+    f = zeros(T, length(ids))
+    f[Int[something(i) for i in indexin(loaded, ids)]] .= one(T)
+    return ids, k[ids, ids], f
+end
+
+"""
+    effective_compliance(k, fixed => loaded)
+
+Return f' * (k[free, free] \\ f), with unit loads at the selected global
+DOFs and zero incremental displacement at fixed DOFs. All other free DOFs
+equilibrate without applied incremental loads. k must be a real, square
+matrix whose free block is nonsingular; no artificial regularization is used.
+
+For one loaded DOF this is its directional compliance (rotation DOFs carry
+unit moments). Multiple loaded DOFs define a simultaneous unit-load pattern,
+not separate compliances; mixed translation/rotation requires consistent
+physical scaling.
+"""
+function effective_compliance(k::AbstractMatrix{T}, dofs::Pair) where {T<:Real}
+    _, ke, f = _compliance_system(k, dofs)
+    return dot(f, ke \ f)
+end
+
+"""
+    effective_stiffness(k, fixed => loaded)
+
+Reciprocal of effective_compliance. For one loaded DOF this is the effective
+tangent stiffness with the remaining free DOFs relaxed. For several loaded
+DOFs it refers to the generalized displacement conjugate to their load pattern.
+This corrects the historical behavior, which returned compliance.
+"""
+function effective_stiffness(k::AbstractMatrix{T}, dofs::Pair) where {T<:Real}
+    compliance = effective_compliance(k, dofs)
+    iszero(compliance) && throw(DomainError(compliance, "zero compliance has no finite reciprocal"))
+    return inv(compliance)
 end
 
 function effective_movement(k::AbstractMatrix{T},u::Pair{AV,AB}) where{T,AV,AB}

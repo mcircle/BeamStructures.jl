@@ -1,0 +1,116 @@
+# Validierung von Methode 1 und 2
+
+## Start
+
+Mit Julia 1.12 (CI: 1.12.1, passend zum Repository-Manifest), aus dem Repository:
+
+```sh
+julia validation/setup.jl
+julia --project=validation validation/run.jl
+```
+
+Die numerische Grundprüfung verwendet echte Package-Funktionen: Balken-ODE,
+Jacobi-Matrix, adjungierte lokale Rückführung sowie Compliance-/Steifigkeitsgradienten.
+Sie läuft für Float32/Float64 und reproduzierbare Seeds aus config.toml.
+Die Matrixfälle von Methode 2 sind **numerische Referenzfälle**, keine optimierten
+Balkentopologien. Ein grüner Lauf bestätigt weder die Gesamtsteifigkeitsassemblierung
+noch die vollständige Adjazenz-/ODE-Ableitungskette oder die mechanische Modelltreue.
+
+Ergebnisse stehen standardmäßig in einem neuen Unterordner von results/.
+metadata.toml enthält Commit, Julia-Version, Threadzahl und Einstellungen;
+das aufgelöste Manifest wird mitgesichert. Konfiguration und Einheiten vor einer
+Dissertationsstudie festlegen. Toleranzen nicht allein zum Bestehen erhöhen.
+
+## Eigene Optimierungsfälle
+
+```sh
+julia --project=validation validation/run.jl validation/results/study path/to/cases.jl
+```
+
+cases.jl definiert `run_cases(settings, output)` und ruft die Funktionen
+`run_method1` und `run_method2` aus Validation.jl auf. Die Adapter verwenden
+deine tatsächlichen Verlustfunktionen, Parametergrenzen und Solver; es wird
+kein Ersatzoptimierer als validierte Methode ausgegeben.
+
+### Methode 1: Adaptervertrag
+
+Ein NamedTuple `case` enthält:
+
+- `name`: kurzer Dateiname ohne Verzeichnistrenner.
+- `initial(rng)`: neuer Parametervektor aus dem übergebenen RNG.
+- `optimize(p0)`: Ergebnis `(parameters=..., converged=Bool, residual=...)`.
+- `evaluate(p, points)`: Gleichgewicht jeweils neu lösen; Matrix mit Spalten
+  Fx [N], Fy [N], Mz [Nm]. Fehler beim Gleichgewichtslösen werfen.
+- `target(points)`: Sollwerte mit identischer Spaltenreihenfolge.
+
+Aufruf:
+
+```julia
+run_method1(case; seeds=settings["seeds"],
+    points=settings["evaluation_points"], directory=output)
+```
+
+Die Optimierung selbst verwendet nur optimization_points; evaluate verwendet
+zusätzliche Zwischenpunkte. Die CSV enthält komponentenweise MAE, Maximalfehler,
+relativen L2-Fehler, Laufzeit und Konvergenz. Bei null Referenznorm ist der relative
+Fehler missing. Kräfte und Momente werden nicht ohne Skalierung zusammengerechnet.
+
+### Methode 2: Adaptervertrag
+
+`case` enthält name, edges sowie:
+
+- `initial(rng)`: gleicher Parameterraum und Seeds wie bei den Referenzen.
+- `relax(p0)`: `(parameters, beta, converged, residual)` als NamedTuple.
+- `admissible(mask)`: prüft mindestens Lageranbindung, Verbindung zum
+  Ausgabeknoten und die für den Fall erforderliche kinematische Zulässigkeit.
+- `score(parameters, beta)`: `(loss, volume)`, mit identischer dimensionsloser
+  Zielfunktion für alle Stufen. Erforderliche Gleichgewichte neu lösen.
+- `refine(parameters, mask)`: Methode 1 bei fester diskreter Topologie;
+  `(parameters, converged, residual)`.
+
+```julia
+run_method2(case; seeds=settings["seeds"], thresholds=settings["thresholds"],
+    directory=output, enumerate=true,
+    max_edges=settings["max_enumerated_edges"])
+```
+
+Pro Seed werden Relaxation, unmittelbare Diskretisierung und Nachoptimierung
+separat erfasst. Für sechs Kandidaten werden alle 64 Masken untersucht;
+unzulässige und fehlgeschlagene Fälle stehen ebenfalls in der CSV.
+Die beste erfolgreich nachoptimierte Referenz ist **kein bewiesenes globales
+Optimum**. Der unmittelbare Diskretisierungsschritt übernimmt keinen
+Konvergenznachweis der relaxierten Lösung.
+
+Vergleiche loss(discrete)-loss(relaxed) und loss(refined)-loss(discrete)
+innerhalb desselben Seeds/Schwellenwerts. Bewerte Balkenanzahl/Volumen gemeinsam
+mit Funktionsfehler, Konvergenzquote und Laufzeit. Neue Strukturen müssen das
+gleiche Rechenbudget und dieselben Parametergrenzen erhalten.
+
+## Mechanische Tangentenprüfung
+
+`tangent_check(reaction, tangent, q, directions, steps)` vergleicht die
+Tangente mit zentralen Differenzen von unabhängig neu gelösten Gleichgewichten.
+reaction muss dieselben festgehaltenen/freien DOFs verwenden wie die Reduktion
+der Matrix. Verwende mehrere Schrittweiten und konsistent skalierte Richtungen
+für Translation und Rotation. Dies überprüft die mechanische Bedeutung von D,
+während ForwardDiff lediglich die implementierte Funktion differenziert.
+
+## Ansys-Vergleich
+
+Exportiere Modell und Ansys als numerische CSV mit genau:
+
+```csv
+point,Fx,Fy,Mz
+```
+
+point ist Verschiebung [m] oder Winkel [rad], für beide Dateien identisch;
+Fx/Fy in N, Mz in Nm. Punkte streng aufsteigend, Dezimalpunkt, Komma als Trenner.
+Vorzeichen, Ausgabeknoten und Lagerung müssen übereinstimmen. Keine automatische
+Interpolation oder Einheitenumrechnung; Modell- und FE-Netzkonvergenz separat dokumentieren.
+
+```sh
+julia --project=validation validation/compare_ansys.jl model.csv ansys.csv errors.csv
+```
+
+Es werden keine erfundenen Ansys-Daten mitgeliefert. Fehlende FE-Daten gelten
+nicht als bestandene Validierung.

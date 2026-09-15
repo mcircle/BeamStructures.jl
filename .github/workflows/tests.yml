@@ -1,0 +1,41 @@
+name: Package tests
+on:
+  push:
+    branches: [master]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+      BEAM_VALIDATION_OUTPUT: validation/results/ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12.1'
+      - uses: julia-actions/cache@v2
+        id: julia_cache
+      - name: Resolve and test package
+        shell: julia --project=. {0}
+        run: |
+          using Pkg
+          Pkg.Registry.add("General")
+          Pkg.resolve()
+          Pkg.instantiate()
+          Pkg.test()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-results
+          path: validation/results/ci
+          if-no-files-found: ignore
+      - name: Preserve dependency cache even when tests fail
+        uses: actions/cache/save@v4
+        if: always() && steps.julia_cache.outputs.cache-key != ''
+        with:
+          path: ${{ steps.julia_cache.outputs.cache-paths }}
+          key: ${{ steps.julia_cache.outputs.cache-key }}
