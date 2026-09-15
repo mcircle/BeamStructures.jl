@@ -16,7 +16,7 @@ function adjacency_matrix(mask, n::Integer)
     adjacency
 end
 
-topology_id(mask) = join(Int.(!iszero.(mask)))
+topology_id(mask) = join(Int(x != 0) for x in mask)
 
 function component(adjacency, start)
     visited = falses(size(adjacency, 1))
