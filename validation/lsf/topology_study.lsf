@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#BSUB -n 1
+#BSUB -W 04:00
+#BSUB -R "rusage[mem=4096]"
+
+set -euo pipefail
+
+cd "${LS_SUBCWD:?LS_SUBCWD is not set}"
+
+method1_shards="${METHOD1_SHARDS:-12}"
+method2_shards="${METHOD2_SHARDS:-4}"
+block_size=$((method1_shards + method2_shards))
+task_zero=$((LSB_JOBINDEX - 1))
+case_index=$((task_zero / block_size))
+within_case=$((task_zero % block_size))
+
+case "${case_index}" in
+  0) study_case="linear_progressive" ;;
+  1) study_case="saddle" ;;
+  2) study_case="valley" ;;
+  *) echo "Invalid LSF array index: ${LSB_JOBINDEX}" >&2; exit 2 ;;
+esac
+
+if (( within_case < method1_shards )); then
+  method="method1"
+  shard_count="${method1_shards}"
+  shard_index=$((within_case + 1))
+else
+  method="method2"
+  shard_count="${method2_shards}"
+  shard_index=$((within_case - method1_shards + 1))
+fi
+
+export BEAM_STUDY_METHOD="${method}"
+export BEAM_STUDY_CASE="${study_case}"
+export BEAM_STUDY_SHARD_INDEX="${shard_index}"
+export BEAM_STUDY_SHARD_COUNT="${shard_count}"
+export BEAM_STUDY_OUTPUT="${BEAM_STUDY_OUTPUT:-validation/results/lsf_shards}"
+
+julia --project=validation validation/run_topology_shard.jl
