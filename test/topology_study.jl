@@ -1,3 +1,5 @@
+using Random
+
 include(joinpath(@__DIR__, "..", "validation", "topology_generation.jl"))
 include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
 
@@ -15,6 +17,14 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
     @test !TopologyGeneration.is_admissible(falses(10))
     @test_throws DimensionMismatch TopologyGeneration.adjacency_matrix([true], 5)
 
+    positions = TopologyGeneration.random_node_positions(
+        MersenneTwister(42); n=5, gridsize=100)
+    @test size(positions) == (2, 5)
+    @test all(x -> 0 <= x <= 100 && isinteger(x), positions)
+    @test length(unique(Tuple.(eachcol(positions)))) == 5
+    @test positions == TopologyGeneration.random_node_positions(
+        MersenneTwister(42); n=5, gridsize=100)
+
     metrics = TopologyEvaluation.curve_metrics(
         [1.0 0.0 2.0; 2.0 0.0 4.0],
         [1.0 0.0 1.0; 1.0 0.0 3.0], (1.0, 1.0, 2.0))
@@ -22,6 +32,10 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
     @test length(metrics.component) == 3
     @test_throws ArgumentError TopologyEvaluation.curve_metrics(
         zeros(2, 3), zeros(2, 3), (1.0, 0.0, 1.0))
+
+    adam = TopologyEvaluation.adam_optimize(
+        x -> sum(abs2, x .- 2), [0.0, 0.0]; eta=0.1, iterations=100)
+    @test adam.objective < 1e-4
 
     mktempdir() do directory
         selected = topologies[1:2]
@@ -35,7 +49,6 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
                 (parameters=[1.0], converged=true, residual=0.0),
             evaluate=(topology, parameters, points) ->
                 hcat(parameters[1].*points, zero(points), zero(points)),
-            volume=(topology, parameters) -> topology.elements*parameters[1],
             method2=rng -> (mask=fixed_mask, converged=true, residual=0.0))
 
         rows = TopologyEvaluation.optimize_topologies(selected, case;
@@ -44,6 +57,7 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
         @test all(row -> row.objective == 0, rows)
         @test all(row -> row.initial_objective > row.objective, rows)
         @test all(row -> row.improvement == row.initial_objective, rows)
+        @test all(row -> ismissing(row.volume), rows)
         summary = TopologyEvaluation.summarize_topologies(rows;
                                                            residual_limit=1e-6)
         @test length(summary) == 2
@@ -58,4 +72,28 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
         @test all(row -> row.gap == 0, comparison)
         @test all(row -> row.frequency == 3, comparison)
     end
+end
+
+
+@testset "Topology study adapter specification" begin
+    include(joinpath(@__DIR__, "..", "validation", "topology_adapter.jl"))
+    points = collect(-10.0:1.0:10.0)
+    for kind in (:linear_progressive, :saddle, :valley)
+        target = target_characteristic(kind, points)
+        @test size(target) == (21, 3)
+        @test all(iszero, target[:, 2:3])
+        @test target[11, 1] == 0
+    end
+    @test target_characteristic(:linear_progressive, [-10.0, 10.0])[:, 1] ==
+          [-10.0, 10.0]
+    @test target_characteristic(:valley, [4.0, 6.0])[1, 1] < 0
+    @test target_characteristic(:valley, [4.0, 6.0])[2, 1] < 0
+    @test_throws ArgumentError target_characteristic(:unknown, points)
+
+    weights = collect(0.1:0.1:1.0)
+    adjacency = weighted_adjacency(weights)
+    @test issymmetric(adjacency)
+    @test all(iszero, diag(adjacency))
+    @test adjacency[2, 1] == weights[1]
+    @test adjacency[5, 4] == weights[end]
 end

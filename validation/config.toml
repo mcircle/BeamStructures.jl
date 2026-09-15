@@ -25,9 +25,22 @@ topology_method2_seeds = [
 topology_residual_limit = 1.0e-6
 thresholds = [0.3, 0.5, 0.7]
 max_enumerated_edges = 10
-# SI displacement samples. Change together with the case adapter.
-optimization_points = [-0.002, 0.0, 0.002]
-evaluation_points = [-0.002, -0.001, 0.0, 0.001, 0.002]
+# Horizontal displacement of node 5 in mm (20 mm total span).
+optimization_points = [-10.0, -5.0, 0.0, 5.0, 10.0]
+evaluation_points = [
+  -10.0, -9.0, -8.0, -7.0, -6.0, -5.0, -4.0, -3.0, -2.0, -1.0,
+  0.0,
+  1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0
+]
+grid_size = 100.0
+target_force_scale = 10.0
+topology_threshold = 0.5
+equilibrium_weight = 10.0
+discreteness_weight = 0.1
+adam_method1_eta = 1.0e-3
+adam_method1_iterations = 500
+adam_method2_eta = 1.0e-3
+adam_method2_iterations = 1000
 
 [Float32]
 atol = 1e-5
