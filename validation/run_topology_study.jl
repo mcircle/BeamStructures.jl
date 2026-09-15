@@ -8,27 +8,33 @@ using .Validation
 using .TopologyGeneration
 using .TopologyEvaluation
 
-length(ARGS) >= 1 || error(
-    "usage: julia --project=validation validation/run_topology_study.jl adapter.jl [output]")
-
-adapter_path = abspath(ARGS[1])
-isfile(adapter_path) || error("adapter not found: $adapter_path")
-include(adapter_path)
-isdefined(@__MODULE__, :topology_study_case) ||
-    error("adapter must define topology_study_case()")
-
-case = topology_study_case()
 settings = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
-output = length(ARGS) >= 2 ? abspath(ARGS[2]) :
+adapter_path = isempty(ARGS) ? nothing : abspath(ARGS[1])
+output_argument = isnothing(adapter_path) ? nothing :
+                  (length(ARGS) >= 2 ? ARGS[2] : nothing)
+output = !isnothing(output_argument) ? abspath(output_argument) :
          joinpath(@__DIR__, "results", "topology_" * string(time_ns()))
 mkpath(output)
 record_environment(output; settings)
 
-n = hasproperty(case, :node_count) ? case.node_count : 5
-clamps = hasproperty(case, :clamp_nodes) ? case.clamp_nodes : (1, 2, 3)
-branches = hasproperty(case, :branch_nodes) ? case.branch_nodes : (4, 5)
-minimum_degree = hasproperty(case, :minimum_branch_degree) ?
-                 case.minimum_branch_degree : 2
+case = nothing
+if !isnothing(adapter_path)
+    isfile(adapter_path) || error("adapter not found: $adapter_path")
+    include(adapter_path)
+    isdefined(@__MODULE__, :topology_study_case) ||
+        error("adapter must define topology_study_case()")
+    case = topology_study_case()
+end
+
+n = isnothing(case) ? 5 :
+    (hasproperty(case, :node_count) ? case.node_count : 5)
+clamps = isnothing(case) ? (1, 2, 3) :
+    (hasproperty(case, :clamp_nodes) ? case.clamp_nodes : (1, 2, 3))
+branches = isnothing(case) ? (4, 5) :
+    (hasproperty(case, :branch_nodes) ? case.branch_nodes : (4, 5))
+minimum_degree = isnothing(case) ? 2 :
+    (hasproperty(case, :minimum_branch_degree) ?
+     case.minimum_branch_degree : 2)
 
 topologies = enumerate_topologies(; n, clamp_nodes=clamps,
     branch_nodes=branches, minimum_branch_degree=minimum_degree)
@@ -36,6 +42,13 @@ topologies = enumerate_topologies(; n, clamp_nodes=clamps,
 catalog = [(topology=t.id, elements=t.elements,
             degrees=join(t.degrees, ";")) for t in topologies]
 write_rows(joinpath(output, "topology_catalog.csv"), catalog)
+
+if isnothing(case)
+    println("No adapter supplied; wrote topology catalog only.")
+    println("Admissible topologies: ", length(topologies))
+    println("Results: ", output)
+    exit()
+end
 
 method1_seeds = get(settings, "topology_method1_seeds", settings["seeds"])
 method2_seeds = get(settings, "topology_method2_seeds", collect(1:200))
