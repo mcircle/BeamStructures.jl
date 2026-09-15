@@ -6,7 +6,24 @@ using ..Validation: errors, write_rows
 using ..TopologyGeneration: topology_id
 
 export curve_metrics, optimize_topologies, summarize_topologies,
-       compare_method2, run_method2_initializations, adam_optimize
+       compare_method2, run_method2_initializations, adam_optimize,
+       write_study_inputs
+
+"""Write the topology catalog and all target curves before optimization."""
+function write_study_inputs(topologies, cases, points, directory)
+    catalog = [(topology=t.id, elements=t.elements,
+                degrees=join(t.degrees, ";")) for t in topologies]
+    write_rows(joinpath(directory, "topology_catalog.csv"), catalog)
+    for case in cases
+        target = case.target(points)
+        size(target) == (length(points), 3) ||
+            throw(DimensionMismatch("target must have Fx, Fy, Mz columns"))
+        rows = [(point=points[i], Fx=target[i, 1], Fy=target[i, 2],
+                 Mz=target[i, 3]) for i in eachindex(points)]
+        write_rows(joinpath(directory, "$(case.name)_target.csv"), rows)
+    end
+    nothing
+end
 
 """Optimize any Optimisers-compatible parameter tree with Adam."""
 function adam_optimize(loss, parameters; eta=1e-3, iterations=500,

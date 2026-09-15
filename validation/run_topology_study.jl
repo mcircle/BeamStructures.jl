@@ -10,9 +10,12 @@ using .TopologyEvaluation
 
 settings = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
 default_adapter = joinpath(@__DIR__, "topology_adapter.jl")
-adapter_path = isempty(ARGS) ? default_adapter :
-               (ARGS[1] == "--catalog-only" ? nothing : abspath(ARGS[1]))
-output_argument = isempty(ARGS) || isnothing(adapter_path) ? nothing :
+mode = isempty(ARGS) ? :full :
+       ARGS[1] == "--catalog-only" ? :catalog :
+       ARGS[1] == "--inputs-only" ? :inputs : :full
+adapter_path = mode == :catalog ? nothing :
+               (mode == :full && !isempty(ARGS) ? abspath(ARGS[1]) : default_adapter)
+output_argument = mode == :full ? (length(ARGS) >= 2 ? ARGS[2] : nothing) :
                   (length(ARGS) >= 2 ? ARGS[2] : nothing)
 output = !isnothing(output_argument) ? abspath(output_argument) :
          joinpath(@__DIR__, "results", "topology_" * string(time_ns()))
@@ -41,12 +44,12 @@ minimum_degree = isempty(cases) ? 2 :
 topologies = enumerate_topologies(; n, clamp_nodes=clamps,
     branch_nodes=branches, minimum_branch_degree=minimum_degree)
 
-catalog = [(topology=t.id, elements=t.elements,
-            degrees=join(t.degrees, ";")) for t in topologies]
-write_rows(joinpath(output, "topology_catalog.csv"), catalog)
+points = settings["evaluation_points"]
+write_study_inputs(topologies, cases, points, output)
 
-if isempty(cases)
-    println("Catalog-only mode; no optimization was run.")
+if mode != :full
+    println(mode == :catalog ? "Catalog-only mode; no optimization was run." :
+            "Input-only mode; no optimization was run.")
     println("Admissible topologies: ", length(topologies))
     println("Results: ", output)
     exit()
@@ -54,14 +57,10 @@ end
 
 method1_seeds = get(settings, "topology_method1_seeds", settings["seeds"])
 method2_seeds = get(settings, "topology_method2_seeds", collect(1:200))
-points = settings["evaluation_points"]
 residual_limit = get(settings, "topology_residual_limit", Inf)
 
 for case in cases
     target = case.target(points)
-    write_rows(joinpath(output, "$(case.name)_target.csv"),
-        [(displacement=points[i], Fx=target[i, 1], Fy=target[i, 2],
-          Mz=target[i, 3]) for i in eachindex(points)])
     runs = optimize_topologies(topologies, case; seeds=method1_seeds,
                                points, directory=output)
     summary = summarize_topologies(runs; residual_limit)

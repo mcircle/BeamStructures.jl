@@ -71,6 +71,13 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             directory, name=case.name)
         @test all(row -> row.gap == 0, comparison)
         @test all(row -> row.frequency == 3, comparison)
+
+        TopologyEvaluation.write_study_inputs(selected, (case,),
+            [-1.0, 0.0, 1.0], directory)
+        @test countlines(joinpath(directory, "topology_catalog.csv")) == 3
+        target_path = joinpath(directory, "fixture_target.csv")
+        @test countlines(target_path) == 4
+        @test first(readlines(target_path)) == "point,Fx,Fy,Mz"
     end
 end
 

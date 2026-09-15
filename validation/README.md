@@ -35,6 +35,17 @@ Nur den Katalog der zulässigen Topologien erzeugt:
 julia --project=validation validation/run_topology_study.jl --catalog-only
 ```
 
+Den Katalog und die drei Sollkennlinien ohne Optimierung als CSV erzeugen:
+
+```sh
+julia --project=validation validation/run_topology_study.jl --inputs-only validation/inputs
+```
+
+Damit entstehen `topology_catalog.csv` sowie die drei Dateien
+`linear_progressive_target.csv`, `saddle_target.csv` und `valley_target.csv`.
+Die erste Spalte heißt einheitlich `point`, sodass die Kennlinien direkt mit
+`compare_ansys.jl` eingelesen werden können.
+
 Die fünf Knoten haben fest die Rollen `Clamp, Clamp, Branch, Branch, Clamp`.
 Knoten 1 und 2 sind fest; Knoten 5 wird horizontal bewegt. Für jeden Seed
 werden fünf verschiedene ganzzahlige Positionen im 100×100-Raster gezogen.
@@ -153,4 +164,3 @@ julia --project=validation validation/compare_ansys.jl model.csv ansys.csv error
 
 Es werden keine erfundenen Ansys-Daten mitgeliefert. Fehlende FE-Daten gelten
 nicht als bestandene Validierung.
-
