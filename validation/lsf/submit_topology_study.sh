@@ -7,9 +7,14 @@ method2_shards="${METHOD2_SHARDS:-4}"
 max_concurrent="${MAX_CONCURRENT:-8}"
 total=$((3 * (method1_shards + method2_shards)))
 
-mkdir -p validation/results/lsf_logs +         validation/results/lsf_shards +         validation/results/lsf_merged
+mkdir -p validation/results/lsf_logs validation/results/lsf_shards validation/results/lsf_merged
 
-submission=$(bsub +  -J "beam_validation[1-${total}]%${max_concurrent}" +  -oo "validation/results/lsf_logs/%J_%I.out" +  -eo "validation/results/lsf_logs/%J_%I.err" +  -env "all,METHOD1_SHARDS=${method1_shards},METHOD2_SHARDS=${method2_shards}" +  < validation/lsf/topology_study.lsf)
+queue_args=()
+if [[ -n "${LSF_QUEUE:-}" ]]; then
+  queue_args=(-q "$LSF_QUEUE")
+fi
+
+submission=$(bsub "${queue_args[@]}" -J "beam_validation[1-${total}]%${max_concurrent}" -oo "validation/results/lsf_logs/%J_%I.out" -eo "validation/results/lsf_logs/%J_%I.err" -env "all,METHOD1_SHARDS=${method1_shards},METHOD2_SHARDS=${method2_shards}" < validation/lsf/topology_study.lsf)
 printf '%s\n' "${submission}"
 
 job_id=$(printf '%s\n' "${submission}" |
@@ -19,4 +24,4 @@ test -n "${job_id}" || {
   exit 1
 }
 
-bsub -w "done(${job_id})" +  -oo "validation/results/lsf_logs/merge_%J.out" +  -eo "validation/results/lsf_logs/merge_%J.err" +  < validation/lsf/merge_topology_study.lsf
+bsub "${queue_args[@]}" -w "done(${job_id})" -oo "validation/results/lsf_logs/merge_%J.out" -eo "validation/results/lsf_logs/merge_%J.err" < validation/lsf/merge_topology_study.lsf

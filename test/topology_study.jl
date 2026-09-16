@@ -72,6 +72,12 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
         @test all(row -> row.gap == 0, comparison)
         @test all(row -> row.frequency == 3, comparison)
 
+        inadmissible_case = (; case..., name="inadmissible",
+            admissible=mask -> false)
+        rejected = TopologyEvaluation.run_method2_initializations(
+            inadmissible_case; seeds=[1], edge_count=10, directory)
+        @test only(rejected).status == "inadmissible"
+
         TopologyEvaluation.write_study_inputs(selected, (case,),
             [-1.0, 0.0, 1.0], directory)
         @test countlines(joinpath(directory, "topology_catalog.csv")) == 3
