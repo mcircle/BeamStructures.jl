@@ -173,8 +173,12 @@ function run_method2_initializations(case; seeds, edge_count, directory)
             elapsed = @elapsed result = case.method2(MersenneTwister(seed))
             length(result.mask) == edge_count ||
                 throw(DimensionMismatch("method 2 returned the wrong mask length"))
+            admissible = !hasproperty(case, :admissible) ||
+                         case.admissible(result.mask)
+            status = !admissible ? "inadmissible" :
+                     (result.converged ? "converged" : "not_converged")
             push!(rows, (seed, topology=topology_id(result.mask),
-                status=result.converged ? "converged" : "not_converged",
+                status,
                 residual=result.residual, seconds=elapsed, message=""))
         catch err
             push!(rows, (seed, topology="", status="failed", residual=missing,

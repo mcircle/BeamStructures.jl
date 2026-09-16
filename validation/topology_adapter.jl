@@ -229,12 +229,15 @@ function topology_study_case(kind, settings)
                      final[2] <= settings["topology_residual_limit"],
            residual=final[2])
     end
+    admissible = mask -> TopologyGeneration.is_admissible(mask;
+        n=NODE_COUNT, clamp_nodes=CLAMP_NODES, branch_nodes=BRANCH_NODES,
+        minimum_branch_degree=2)
 
     (name=String(kind), node_count=NODE_COUNT, clamp_nodes=CLAMP_NODES,
      branch_nodes=BRANCH_NODES, minimum_branch_degree=2, scales,
      target=displacements -> target_characteristic(kind, displacements;
          force_scale=settings["target_force_scale"]),
-     initial, optimize, evaluate, method2)
+     initial, optimize, evaluate, method2, admissible)
 end
 
 topology_study_cases(settings) =
