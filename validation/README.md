@@ -35,6 +35,58 @@ Nur den Katalog der zulässigen Topologien erzeugt:
 julia --project=validation validation/run_topology_study.jl --catalog-only
 ```
 
+Den Katalog und die drei Sollkennlinien ohne Optimierung als CSV erzeugen:
+
+```sh
+julia --project=validation validation/run_topology_study.jl --inputs-only validation/inputs
+```
+
+Damit entstehen `topology_catalog.csv` sowie die drei Dateien
+`linear_progressive_target.csv`, `saddle_target.csv` und `valley_target.csv`.
+Die erste Spalte heißt einheitlich `point`, sodass die Kennlinien direkt mit
+`compare_ansys.jl` eingelesen werden können.
+
+Ein kurzer End-to-End-Test mit einer Topologie, einem Seed, zwei
+Auslenkungspunkten und je einem Adam-Schritt läuft mit:
+
+```sh
+julia --project=validation validation/run_topology_smoke.jl
+```
+
+Er verwendet dieselben Modell-, Gradienten- und CSV-Pfade wie die vollständige
+Studie. Er prüft die technische Ausführbarkeit, nicht Optimierungsgüte oder
+Konvergenz.
+
+## LSF-Job-Array
+
+Nach einmaligem Einrichten der Validierungsumgebung wird die vollständige
+Studie mit folgendem Befehl eingereicht:
+
+```sh
+julia validation/setup.jl
+bash validation/lsf/submit_topology_study.sh
+```
+
+Standardmäßig entstehen 48 Array-Tasks: je Sollkennlinie zwölf Shards für
+Methode 1 und vier für Methode 2. Höchstens acht Tasks laufen gleichzeitig.
+Die Aufteilung kann beim Einreichen angepasst werden:
+
+```sh
+METHOD1_SHARDS=16 METHOD2_SHARDS=4 MAX_CONCURRENT=8 \
+  bash validation/lsf/submit_topology_study.sh
+```
+
+Jeder Task schreibt kollisionsfrei nach `validation/results/lsf_shards/`.
+Nach erfolgreichem Abschluss des gesamten Arrays startet automatisch der
+Merge-Job. Die finalen CSVs liegen in `validation/results/lsf_merged/`.
+Schlägt ein Array-Task fehl, startet der Merge wegen der LSF-Bedingung
+`done(job_id)` nicht; nach dem erneuten Ausführen fehlender Tasks kann er
+manuell eingereicht werden:
+
+```sh
+bsub < validation/lsf/merge_topology_study.lsf
+```
+
 Die fünf Knoten haben fest die Rollen `Clamp, Clamp, Branch, Branch, Clamp`.
 Knoten 1 und 2 sind fest; Knoten 5 wird horizontal bewegt. Für jeden Seed
 werden fünf verschiedene ganzzahlige Positionen im 100×100-Raster gezogen.
@@ -153,4 +205,3 @@ julia --project=validation validation/compare_ansys.jl model.csv ansys.csv error
 
 Es werden keine erfundenen Ansys-Daten mitgeliefert. Fehlende FE-Daten gelten
 nicht als bestandene Validierung.
-

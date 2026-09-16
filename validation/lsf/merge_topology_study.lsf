@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#BSUB -J beam_validation_merge
+#BSUB -n 1
+#BSUB -W 00:30
+#BSUB -R "rusage[mem=2048]"
+
+set -euo pipefail
+cd "${LS_SUBCWD:?LS_SUBCWD is not set}"
+
+shard_root="${BEAM_STUDY_OUTPUT:-validation/results/lsf_shards}"
+merged_output="${BEAM_STUDY_MERGED_OUTPUT:-validation/results/lsf_merged}"
+julia --project=validation validation/merge_topology_shards.jl +  "${shard_root}" "${merged_output}"
