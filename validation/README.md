@@ -64,9 +64,12 @@ indem ausschließlich die Zustandsvariablen optimiert werden:
 julia --project=validation validation/run_equilibrium_diagnostic.jl
 ```
 
-Die erzeugte CSV protokolliert Gesamtverlust, Kennlinienverlust,
-Residuen-MSE/-RMS, maximales absolutes Residuum und die Norm des
-Residuen-Gradienten. Iterationszahl, Lernrate und Ausgabe lassen sich über
+Die Diagnose startet vier unabhängige Läufe von derselben Initialisierung:
+nur Zustände, Zustände und Balken, Zustände/Balken/Knoten sowie zusätzlich
+relaxierte Adjazenzgewichte mit dem Startwert 0,5. Die erzeugte CSV
+protokolliert Gesamtverlust, Kennlinienverlust, Residuen-MSE/-RMS, maximales
+absolutes Residuum sowie Zustands- und Gewichtsgradienten. Iterationszahl,
+Lernrate und Ausgabe lassen sich über
 `BEAM_DIAGNOSTIC_ITERATIONS`, `BEAM_DIAGNOSTIC_ETA` und
 `BEAM_DIAGNOSTIC_OUTPUT` einstellen.
 
