@@ -48,15 +48,12 @@ binary_gaussian_penalty(weights, sigma) = mean(
 function target_stiffness(target, points)
     n = length(points)
     n >= 2 || throw(ArgumentError("at least two points are required"))
-    stiffness = similar(view(target, :, 1))
-    stiffness[1] = (target[2, 1] - target[1, 1]) / (points[2] - points[1])
-    for i in 2:n-1
-        stiffness[i] = (target[i+1, 1] - target[i-1, 1]) /
-                       (points[i+1] - points[i-1])
+    map(1:n) do i
+        left = max(1, i - 1)
+        right = min(n, i + 1)
+        (target[right, 1] - target[left, 1]) /
+            (points[right] - points[left])
     end
-    stiffness[n] = (target[n, 1] - target[n-1, 1]) /
-                   (points[n] - points[n-1])
-    stiffness
 end
 
 function effective_stiffness_curve(model, beams, nodes, states, weights, points)
