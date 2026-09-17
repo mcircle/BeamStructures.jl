@@ -37,6 +37,7 @@ target_force_scale = 10.0
 topology_threshold = 0.5
 equilibrium_weight = 10.0
 discreteness_weight = 0.1
+gaussian_sigma = 0.15
 adam_method1_eta = 1.0e-3
 adam_method1_iterations = 500
 adam_method2_eta = 1.0e-3
