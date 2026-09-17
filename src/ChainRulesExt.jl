@@ -480,82 +480,64 @@ function CRC.rrule(::typeof(residuals!),residuals::Matrix,str::Structure,y::Ense
 end
 
 function CRC.rrule(::typeof(residuals!),residuals::AbstractMatrix,adj_::AbstractMatrix{T},y::AbstractArray,beamtpl::BT,nodetpl::NT) where{T,BT<:NamedTuple,NT<:NamedTuple}
-    adj = clamp.(adj_, zero(T), one(T))
-    ids = getindices(size(adj,1))
-    factors = adj[ids]
+
+    ind = 1
+    idcs = getindices(size(adj_,1))
+    adj = ifelse.(adj_ .> 1,one(T),adj_ )
+    adj = ifelse.(adj .< 0, zero(T),adj_ )
 
     branches = filter(x->canchangeposition(nodetpl[x]),eachindex(nodetpl))
     nbr_branches = length(branches)
     residuals_forces = @view residuals[:,1:nbr_branches]
     residuals_positions = @view residuals[:,nbr_branches+1:end]
+
     forces = 1
+    positions = 1
+
+    rrforce = Vector{Function}(undef,length(branches))
+    rrpos = Vector{Pair{AbstractRange{Int},Function}}()
 
     for (node,beams) in beamsatnode(adj,nodetpl,beamtpl)
+        
         if forcesatnode(nodetpl[node])
-            residuals_forces[:,forces] .= reduceforceat(
-                nodetpl[node],beamtpl,y,factors,beams)
+            reduceforceat!(view(residuals_forces,:,forces),nodetpl[node],beamtpl,y,beams)
             forces += 1
-        end
-        for b in beams[2]
-            residuals_positions[:,b] .= factors[b] .* (
-                [nodetpl[node].ϕ,nodetpl[node].x,nodetpl[node].y] .-
-                scalepos(beamtpl[b],y[2:4,2,b],Val(2)))
-        end
-    end
-
-    function residuals!_back(ȳt)
-        ȳ = CRC.unthunk(ȳt)
+        end 
+        if !isempty(beams[2])
+            reduceposat!(view(residuals_positions,:,beams[2]),nodetpl[node],beamtpl,y,beams[2])
+        end  
+    end   
+    function residuals!_back(ȳ)
+        ȳ_ = CRC.unthunk(ȳ)
         ∂res = @thunk(CRC.zero_tangent(residuals))
         ∂y = zero(y)
-        ∂factors = zeros(T,length(factors))
-        ∂beams = CRC.zero_tangent(beamtpl)
-        ∂nodes = CRC.zero_tangent(nodetpl)
+        ∂fac = zero(adj)
+        ∂beams = CRC.zero_tangent(beamtpl)         
+        ∂nodes = CRC.zero_tangent(nodetpl) 
 
-        ȳ_forces = @view ȳ[:,1:nbr_branches]
-        ȳ_positions = @view ȳ[:,nbr_branches+1:end]
+        ȳ_forces = @view ȳ_[:,1:nbr_branches]
+        ȳ_positions = @view ȳ_[:,nbr_branches+1:end]
         forcenbr = 1
 
         for (node,beams) in beamsatnode(adj,nodetpl,beamtpl)
+            
             if forcesatnode(nodetpl[node])
-                ȳforce = view(ȳ_forces,:,forcenbr)
-                for b in beams[1]
-                    scaled = scaleforce(beamtpl[b],y[[1,5,6],2,b])
-                    ∂factors[b] += dot(ȳforce,scaled)
-                    ∂beams = forcesbackatend!(
-                        ∂y,∂beams,factors[b] .* ȳforce,y,beamtpl,[b])
-                end
-                for b in beams[2]
-                    scaled = scaleforce(beamtpl[b],y[[1,5,6],1,b])
-                    ∂factors[b] -= dot(ȳforce,scaled)
-                    ∂beams = forcesbackatstart!(
-                        ∂y,∂beams,factors[b] .* ȳforce,y,beamtpl,[b])
-                end
+                ∂beams,dnode = force_bound_back(view(ȳ_forces,:,forcenbr),∂y,y,beamtpl,beams,∂beams,nodetpl[node])        
                 forcenbr += 1
             end
-            for b in beams[2]
-                ȳpos = view(ȳ_positions,:,b)
-                scaled_position = scalepos(beamtpl[b],y[2:4,2,b],Val(2))
-                delta = [nodetpl[node].ϕ,nodetpl[node].x,nodetpl[node].y] .-
-                        scaled_position
-                ∂factors[b] += dot(ȳpos,delta)
-                _,dbeam,dy,_ = scalepos_back(
-                    factors[b] .* ȳpos,y[2:4,2,b],beamtpl[b])
-                ∂beams -= Tangent{BT}(;keys(beamtpl)[b] => dbeam)
-                ∂y[2:4,2,b] .-= dy
-                ∂nodes += Tangent{NT}(;node => Tangent{typeof(nodetpl[node])}(
-                    ;ϕ=factors[b]*ȳpos[1],
-                     x=factors[b]*ȳpos[2],
-                     y=factors[b]*ȳpos[3]))
+            if !isempty(beams[2])
+                reduceposat_back!(view(ȳ_positions,:,beams[2]),∂y,y,beams[2],nodetpl[node],beamtpl,∂beams)
+                ∂nodes += Tangent{NT}(;node =>  Tangent{typeof(nodetpl[node])}(;x = sum(ȳ_positions[2,beams[2]]),y =  sum(ȳ_positions[3,beams[2]]),ϕ = sum(ȳ_positions[1,beams[2]])))
+                ∂beams = reduceposat_back!(view(ȳ_positions,:,beams[2]),∂y,y,beams[2],nodetpl[node],beamtpl,∂beams)
+                ∂nodes += Tangent{NT}(;node =>  Tangent{typeof(nodetpl[node])}(;x = sum(ȳ_positions[2,beams[2]]),y =  sum(ȳ_positions[3,beams[2]]),ϕ = sum(ȳ_positions[1,beams[2]])))
+                
+                # @show ∂nodes[node]
             end
-        end
-
-        ∂adj = zeros(T,size(adj_))
-        ∂adj[ids] .= ∂factors
-        ∂adj .*= (adj_ .>= zero(T)) .& (adj_ .<= one(T))
-        return NoTangent(),∂res,∂adj,∂y,∂beams,∂nodes
-    end
+        end 
+        return NoTangent(),∂res,∂fac,∂y,∂beams,∂nodes
+    end    
     return residuals,residuals!_back
-end
+end 
 
 function CRC.rrule(::typeof(residuals!),residuals::Matrix,adj::AbstractMatrix,y::EnsembleSolution,beams,nodes)
     y = toArray(y)
