@@ -174,6 +174,75 @@ function optimize_equilibrium_states(model, beams, nodes, states, weights, point
        residual_mse=equilibrium_loss(model, beams, nodes, states, weights, points))
 end
 
+function optimize_equilibrium_beams_states(model, beams, nodes, states, weights,
+                                           points; eta, iterations,
+                                           callback=nothing)
+    beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
+    value_state = Optimisers.setup(Optimisers.Adam(eta), states)
+    for iteration in 1:iterations
+        value, gradients = Zygote.withgradient(
+            (b, x) -> equilibrium_loss(model, b, nodes, x, weights, points),
+            beams, states)
+        isfinite(value) || error("non-finite equilibrium objective")
+        beam_state, beams = Optimisers.update(beam_state, beams, gradients[1])
+        value_state, states = Optimisers.update(value_state, states, gradients[2])
+        isnothing(callback) || callback(iteration, value, norm(gradients[2]),
+                                        NaN, beams, nodes, states, weights)
+    end
+    (; beams, nodes, states, weights,
+       residual_mse=equilibrium_loss(model, beams, nodes, states, weights, points))
+end
+
+function optimize_equilibrium_full(model, beams, nodes, states, weights, points;
+                                   eta, iterations, callback=nothing)
+    beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
+    node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
+    value_state = Optimisers.setup(Optimisers.Adam(eta), states)
+    for iteration in 1:iterations
+        value, gradients = Zygote.withgradient(
+            (b, n, x) -> equilibrium_loss(model, b, n, x, weights, points),
+            beams, nodes, states)
+        isfinite(value) || error("non-finite equilibrium objective")
+        beam_state, beams = Optimisers.update(beam_state, beams, gradients[1])
+        node_state, nodes = Optimisers.update(node_state, nodes, gradients[2])
+        value_state, states = Optimisers.update(value_state, states, gradients[3])
+        isnothing(callback) || callback(iteration, value, norm(gradients[3]),
+                                        NaN, beams, nodes, states, weights)
+    end
+    (; beams, nodes, states, weights,
+       residual_mse=equilibrium_loss(model, beams, nodes, states, weights, points))
+end
+
+function optimize_equilibrium_relaxed(model, beams, nodes, states, raw_weights,
+                                      points; eta, iterations,
+                                      callback=nothing)
+    beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
+    node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
+    value_state = Optimisers.setup(Optimisers.Adam(eta), states)
+    weight_state = Optimisers.setup(Optimisers.Adam(eta), raw_weights)
+    sigmoid(z) = one(eltype(z)) ./ (one(eltype(z)) .+ exp.(-z))
+    for iteration in 1:iterations
+        value, gradients = Zygote.withgradient(
+            (b, n, x, z) -> equilibrium_loss(
+                model, b, n, x, sigmoid(z), points),
+            beams, nodes, states, raw_weights)
+        isfinite(value) || error("non-finite equilibrium objective")
+        beam_state, beams = Optimisers.update(beam_state, beams, gradients[1])
+        node_state, nodes = Optimisers.update(node_state, nodes, gradients[2])
+        value_state, states = Optimisers.update(value_state, states, gradients[3])
+        weight_gradient_norm = norm(gradients[4])
+        weight_state, raw_weights = Optimisers.update(
+            weight_state, raw_weights, gradients[4])
+        weights = sigmoid(raw_weights)
+        isnothing(callback) || callback(iteration, value, norm(gradients[3]),
+                                        weight_gradient_norm, beams, nodes,
+                                        states, weights)
+    end
+    weights = sigmoid(raw_weights)
+    (; beams, nodes, states, raw_weights, weights,
+       residual_mse=equilibrium_loss(model, beams, nodes, states, weights, points))
+end
+
 function initial_parameters(rng, points)
     positions = Float32.(random_node_positions(rng; n=NODE_COUNT, gridsize=100))
     beams = make_beams(positions, rng)
@@ -269,7 +338,8 @@ function topology_study_case(kind, settings)
     end
     method2 = function(rng)
         parameters = initial_parameters(rng, points)
-        raw_weights = randn(rng, Float32, length(EDGE_LIST))
+        # sigmoid(0) = 0.5 for every off-diagonal adjacency entry.
+        raw_weights = zeros(Float32, length(EDGE_LIST))
         result = optimize_relaxed(model, parameters, raw_weights, points, target,
             scales, residual_weight, Float32(settings["discreteness_weight"]);
             eta=Float32(settings["adam_method2_eta"]),
