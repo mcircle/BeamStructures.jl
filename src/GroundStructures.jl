@@ -228,34 +228,29 @@ function reduceforceat(node::Boundary,Beams::NamedTuple,y::AbstractArray{T,3},fa
     return solp .- solm #.+ node[[6,4,5]]
 end 
 
-function residuals!(residuals::Matrix,adj::AbstractMatrix{TA},y::AbstractArray{T,N},beamstpl,nodestpl) where{T,TA,N}
-    
+function residuals!(residuals::Matrix,adj_::AbstractMatrix{TA},y::AbstractArray{T,N},beamstpl,nodestpl) where{T,TA,N}
+    adj = clamp.(adj_, zero(TA), one(TA))
     ids = getindices(size(adj,1))
-    adj_ = ifelse.(adj .> 1,1,adj)
-    adj_ = ifelse.(adj_ .< 0,0,adj)
+    factors = adj[ids]
 
     branches = count(x->!isa(x,Clamp),nodestpl)
     residuals_forces = @view residuals[:,1:branches]
     residuals_positions = @view residuals[:,branches+1:end]
     forces = 1
-    positions = 1
     for (node,beams) in beamsatnode(adj,nodestpl,beamstpl)
-
         if forcesatnode(nodestpl[node])
-            reduceforceat!(view(residuals_forces,:,forces),nodestpl[node],beamstpl,y,beams)
-            # residuals_forces[:,forces] .= res
+            residuals_forces[:,forces] .= reduceforceat(
+                nodestpl[node],beamstpl,y,factors,beams)
             forces += 1
-        end 
-
-        if !isempty(beams[2]) 
-            # idxs = positions:positions + length(beams[2]) -1
-            reduceposat!(view(residuals_positions,:,beams[2]),nodestpl[node],beamstpl,y,beams[2])
-            # positions = length(beams[2]) + 1
-        end  
-
+        end
+        for b in beams[2]
+            residuals_positions[:,b] .= factors[b] .* (
+                [nodestpl[node].ϕ,nodestpl[node].x,nodestpl[node].y] .-
+                scalepos(beamstpl[b],y[2:4,2,b],Val(2)))
+        end
     end
-    residuals 
-end 
+    residuals
+end
 
 function residuals!(residuals::Matrix,adj::AbstractMatrix{T},y::EnsembleSolution,bn) where{T}
     y = toArray(y)
