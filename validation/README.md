@@ -57,6 +57,19 @@ Er verwendet dieselben Modell-, Gradienten- und CSV-Pfade wie die vollständige
 Studie. Er prüft die technische Ausführbarkeit, nicht Optimierungsgüte oder
 Konvergenz.
 
+Das Gleichgewicht kann unabhängig von Geometrie und Topologie geprüft werden,
+indem ausschließlich die Zustandsvariablen optimiert werden:
+
+```sh
+julia --project=validation validation/run_equilibrium_diagnostic.jl
+```
+
+Die erzeugte CSV protokolliert Gesamtverlust, Kennlinienverlust,
+Residuen-MSE/-RMS, maximales absolutes Residuum und die Norm des
+Residuen-Gradienten. Iterationszahl, Lernrate und Ausgabe lassen sich über
+`BEAM_DIAGNOSTIC_ITERATIONS`, `BEAM_DIAGNOSTIC_ETA` und
+`BEAM_DIAGNOSTIC_OUTPUT` einstellen.
+
 ## LSF-Job-Array
 
 Nach einmaligem Einrichten der Validierungsumgebung wird die vollständige
