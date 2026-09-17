@@ -91,10 +91,10 @@ function response(model, beams, nodes, states, weights, displacements)
         solutions, solved_beams, solved_nodes = model(
             states[:, :, index], beams, displaced_nodes, adjacency)
         residual = zeros(eltype(solutions), size(states, 1), size(states, 2))
-        TopologyBS.residuals!(residual, adjacency, solutions,
-                               solved_beams, solved_nodes)
+        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
+                                          solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
-        (reaction, residual)
+        (reaction, residual_)
     end
     actual = reduce(vcat, (permutedims(sample[1]) for sample in samples))
     residual = sqrt(mean(abs2, reduce(vcat,
@@ -102,24 +102,76 @@ function response(model, beams, nodes, states, weights, displacements)
     (actual, residual)
 end
 
-function study_loss(model, beams, nodes, states, weights, points, target,
-                    scales, residual_weight, discreteness_weight=0.0)
+function loss_components(model, beams, nodes, states, weights, points, target,
+                         scales)
     adjacency = weighted_adjacency(weights)
-    loss = zero(eltype(states))
-    for index in eachindex(points)
+    samples = map(eachindex(points)) do index
         displaced_nodes = moved_nodes(nodes, points[index])
         solutions, solved_beams, solved_nodes = model(
             states[:, :, index], beams, displaced_nodes, adjacency)
-        residual = zeros(eltype(solutions), size(states, 1), size(states, 2))
-        TopologyBS.residuals!(residual, adjacency, solutions,
-                               solved_beams, solved_nodes)
+        residual = zeros(eltype(states), size(states, 1), size(states, 2))
+        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
+                                          solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
         characteristic = mean(abs2,
             (reaction .- view(target, index, :)) ./ collect(scales))
-        loss += characteristic + residual_weight * mean(abs2, residual)
+        (; characteristic, residual_mse=mean(abs2, residual_),
+           residual_max=maximum(abs, residual_))
+    end
+    (; characteristic=mean(sample.characteristic for sample in samples),
+       residual_mse=mean(sample.residual_mse for sample in samples),
+       residual_rms=sqrt(mean(sample.residual_mse for sample in samples)),
+       residual_max=maximum(sample.residual_max for sample in samples))
+end
+
+function equilibrium_loss(model, beams, nodes, states, weights, points)
+    adjacency = weighted_adjacency(weights)
+    losses = map(eachindex(points)) do index
+        displaced_nodes = moved_nodes(nodes, points[index])
+        solutions, solved_beams, solved_nodes = model(
+            states[:, :, index], beams, displaced_nodes, adjacency)
+        residual = zeros(eltype(states), size(states, 1), size(states, 2))
+        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
+                                          solved_beams, solved_nodes)
+        mean(abs2, residual_)
+    end
+    mean(losses)
+end
+
+function study_loss(model, beams, nodes, states, weights, points, target,
+                    scales, residual_weight, discreteness_weight=0.0)
+    adjacency = weighted_adjacency(weights)
+    samples = map(eachindex(points)) do index
+        displaced_nodes = moved_nodes(nodes, points[index])
+        solutions, solved_beams, solved_nodes = model(
+            states[:, :, index], beams, displaced_nodes, adjacency)
+        residual = zeros(eltype(states), size(states, 1), size(states, 2))
+        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
+                                          solved_beams, solved_nodes)
+        reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
+        characteristic = mean(abs2,
+            (reaction .- view(target, index, :)) ./ collect(scales))
+        characteristic + residual_weight * mean(abs2, residual_)
     end
     discreteness = mean(abs2, weights .* (one(eltype(weights)) .- weights))
-    loss / length(points) + discreteness_weight * discreteness
+    mean(samples) + discreteness_weight * discreteness
+end
+
+function optimize_equilibrium_states(model, beams, nodes, states, weights, points;
+                                     eta, iterations, callback=nothing)
+    optimizer_state = Optimisers.setup(Optimisers.Adam(eta), states)
+    for iteration in 1:iterations
+        value, gradients = Zygote.withgradient(
+            x -> equilibrium_loss(model, beams, nodes, x, weights, points), states)
+        isfinite(value) || error("non-finite equilibrium objective")
+        gradient = only(gradients)
+        gradient_norm = norm(gradient)
+        optimizer_state, states = Optimisers.update(
+            optimizer_state, states, gradient)
+        isnothing(callback) || callback(iteration, value, gradient_norm, states)
+    end
+    (; states,
+       residual_mse=equilibrium_loss(model, beams, nodes, states, weights, points))
 end
 
 function initial_parameters(rng, points)
