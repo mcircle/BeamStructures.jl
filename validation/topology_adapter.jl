@@ -69,14 +69,20 @@ function effective_stiffness_curve(model, beams, nodes, states, weights, points)
     end
 end
 
-function topology_stiffness_loss(model, beams, nodes, states, weights, points,
-                                 target, discreteness_weight,
-                                 gaussian_sigma)
+function topology_stiffness_fit(model, beams, nodes, states, weights, points,
+                                target)
     actual = effective_stiffness_curve(
         model, beams, nodes, states, weights, points)
     desired = target_stiffness(target, points)
     scale = max(maximum(abs, desired), eps(eltype(desired)))
-    fit = mean(abs2, (actual .- desired) ./ scale)
+    mean(abs2, (actual .- desired) ./ scale)
+end
+
+function topology_stiffness_loss(model, beams, nodes, states, weights, points,
+                                 target, discreteness_weight,
+                                 gaussian_sigma)
+    fit = topology_stiffness_fit(
+        model, beams, nodes, states, weights, points, target)
     binary = binary_gaussian_penalty(
         weights, eltype(weights)(gaussian_sigma))
     fit + discreteness_weight * binary
@@ -357,7 +363,7 @@ function topology_study_case(kind, settings)
         (; parameters=optimized,
            converged=isfinite(result.objective) &&
                      final[2] <= settings["topology_residual_limit"],
-           residual=final[2])
+           residual=final[2], optimization_objective=result.objective)
     end
     evaluate = (topology, parameters, evaluation_points) -> begin
         Float32.(evaluation_points) == points ||
@@ -373,12 +379,57 @@ function topology_study_case(kind, settings)
             eta=Float32(settings["adam_method2_eta"]),
             iterations=settings["adam_method2_iterations"],
             gaussian_sigma=Float32(settings["gaussian_sigma"]))
-        final = response(model, result.beams, result.nodes, result.states,
-                         result.weights, points)
-        (; mask=result.weights .>= settings["topology_threshold"],
-           converged=isfinite(result.objective) &&
-                     final[2] <= settings["topology_residual_limit"],
-           residual=final[2])
+        relaxed_parameters = (; beams=result.beams, nodes=result.nodes,
+                              states=result.states)
+        relaxed_response = response(model, result.beams, result.nodes,
+                                    result.states, result.weights, points)
+        mask = result.weights .>= settings["topology_threshold"]
+        discrete_weights = Float32.(mask)
+        is_admissible = TopologyGeneration.is_admissible(mask;
+            n=NODE_COUNT, clamp_nodes=CLAMP_NODES, branch_nodes=BRANCH_NODES,
+            minimum_branch_degree=2)
+        relaxed_stiffness_error = topology_stiffness_fit(
+            model, result.beams, result.nodes, result.states, result.weights,
+            points, target)
+        discrete_stiffness_error = try
+            topology_stiffness_fit(model, result.beams, result.nodes,
+                result.states, discrete_weights, points, target)
+        catch
+            missing
+        end
+
+        refined = is_admissible ? optimize_fixed(
+            model, relaxed_parameters, discrete_weights, points, target,
+            scales, residual_weight;
+            eta=Float32(settings["adam_method1_eta"]),
+            iterations=settings["adam_method1_iterations"]) : nothing
+        final_parameters = isnothing(refined) ? relaxed_parameters :
+            (; beams=refined.beams, nodes=refined.nodes, states=refined.states)
+        final_weights = isnothing(refined) ? result.weights : discrete_weights
+        final_response = response(model, final_parameters.beams,
+            final_parameters.nodes, final_parameters.states, final_weights, points)
+        refined_stiffness_error = isnothing(refined) ? missing :
+            topology_stiffness_fit(model, refined.beams, refined.nodes,
+                refined.states, discrete_weights, points, target)
+        optimization_objective = isnothing(refined) ? result.objective :
+                                 refined.objective
+        bounded = clamp.(result.weights, 0f0, 1f0)
+        (; mask, parameters=final_parameters,
+           adjacency=weighted_adjacency(discrete_weights),
+           continuous_adjacency=weighted_adjacency(bounded),
+           weights=bounded,
+           converged=is_admissible && isfinite(optimization_objective) &&
+                     final_response[2] <= settings["topology_residual_limit"],
+           residual=final_response[2],
+           relaxed_residual=relaxed_response[2],
+           optimization_objective,
+           relaxed_optimization_objective=result.objective,
+           relaxed_stiffness_error, discrete_stiffness_error,
+           refined_stiffness_error,
+           gaussian_penalty=binary_gaussian_penalty(
+               bounded, Float32(settings["gaussian_sigma"])),
+           mean_binary_distance=mean(min.(bounded, 1f0 .- bounded)),
+           max_binary_distance=maximum(min.(bounded, 1f0 .- bounded)))
     end
     admissible = mask -> TopologyGeneration.is_admissible(mask;
         n=NODE_COUNT, clamp_nodes=CLAMP_NODES, branch_nodes=BRANCH_NODES,
@@ -386,6 +437,7 @@ function topology_study_case(kind, settings)
 
     (name=String(kind), node_count=NODE_COUNT, clamp_nodes=CLAMP_NODES,
      branch_nodes=BRANCH_NODES, minimum_branch_degree=2, scales,
+     evaluation_points=points,
      target=displacements -> target_characteristic(kind, displacements;
          force_scale=settings["target_force_scale"]),
      initial, optimize, evaluate, method2, admissible)
