@@ -73,6 +73,20 @@ Lernrate und Ausgabe lassen sich über
 `BEAM_DIAGNOSTIC_ITERATIONS`, `BEAM_DIAGNOSTIC_ETA` und
 `BEAM_DIAGNOSTIC_OUTPUT` einstellen.
 
+Der für Methode 2 relevante Adjazenzgradient wird separat geprüft:
+
+```sh
+julia --project=validation validation/run_adjacency_diagnostic.jl
+```
+
+Der Test differenziert den vorgesehenen Pfad `admittance_matrix` →
+`effective_stiffness` mit Zygote und ForwardDiff. Die Sollsteifigkeit ist die
+numerische Ableitung der Sollkennlinie. Die zehn unabhängigen Kanten starten
+bei 0,5; daraus entsteht eine symmetrische 5×5-Adjazenzmatrix mit Nullen auf
+der Diagonalen. Nach jedem Adam-Schritt werden die Kantenwerte mit `clamp` auf
+`[0,1]` begrenzt. Eine Gauß-Strafe mit Zentrum 0,5 und der in
+`gaussian_sigma` festgelegten Breite drängt Zwischenwerte zu 0 oder 1.
+
 ## LSF-Job-Array
 
 Nach einmaligem Einrichten der Validierungsumgebung wird die vollständige
@@ -95,6 +109,13 @@ METHOD1_SHARDS=16 METHOD2_SHARDS=4 MAX_CONCURRENT=8 \
 Jeder Task schreibt kollisionsfrei nach `validation/results/lsf_shards/`.
 Nach erfolgreichem Abschluss des gesamten Arrays startet automatisch der
 Merge-Job. Die finalen CSVs liegen in `validation/results/lsf_merged/`.
+Für jede Sollkennlinie und Methode wird dort zusätzlich die Datei
+`<kennlinie>_<methode>_best_solution.jld2` erzeugt. Sie enthält mindestens
+`beams`, `nodes`, `solution` und `adjacency`; für Methode 2 wird außerdem die
+kontinuierliche Adjazenzmatrix gespeichert. Nach einem vollständig erfolgreichen
+Merge wird `lsf_shards/` standardmäßig entfernt. Mit
+`BEAM_STUDY_CLEAN_SHARDS=false` bleiben die Zwischenstände erhalten. Die
+LSF-Logs werden nicht automatisch gelöscht.
 Schlägt ein Array-Task fehl, startet der Merge wegen der LSF-Bedingung
 `done(job_id)` nicht; nach dem erneuten Ausführen fehlender Tasks kann er
 manuell eingereicht werden:
@@ -127,6 +148,12 @@ Im Ergebnisordner liegen `topology_catalog.csv` sowie je Kennlinie
 `*_method2_runs.csv` und `*_method2_comparison.csv`. Bei einem nicht
 konvergierten Referenzlauf bleiben die Vergleichswerte leer, statt den gesamten
 Versuch abzubrechen.
+
+Die Methode-2-CSV enthält zusätzlich die zehn kontinuierlichen Kantenwerte,
+Gauß-Strafe, mittleren und maximalen Abstand zur Binärlösung sowie die
+Steifigkeitsfehler vor Diskretisierung, direkt nach Diskretisierung und nach
+der festen Nachoptimierung mit Methode 1. Nur zulässige diskrete Topologien
+werden nachoptimiert und als beste Lösung berücksichtigt.
 
 ## Eigene Optimierungsfälle
 

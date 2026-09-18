@@ -48,7 +48,7 @@ function record!(mode, iteration, state_gradient_norm, weight_gradient_norm,
     end
 end
 
-for mode in (:states, :beams_states, :full, :relaxed)
+for mode in (:states, :beams_states, :full)
     parameters = deepcopy(initial)
     initial_gradient = Zygote.gradient(
         x -> equilibrium_loss(model, parameters.beams, parameters.nodes, x,
@@ -72,10 +72,6 @@ for mode in (:states, :beams_states, :full, :relaxed)
     elseif mode === :full
         optimize_equilibrium_full(model, parameters.beams, parameters.nodes,
             parameters.states, weights, points; eta, iterations, callback)
-    else
-        raw_weights = zeros(Float32, length(EDGE_LIST))
-        optimize_equilibrium_relaxed(model, parameters.beams, parameters.nodes,
-            parameters.states, raw_weights, points; eta, iterations, callback)
     end
 end
 
