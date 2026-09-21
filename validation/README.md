@@ -146,9 +146,11 @@ berechnet noch bewertet.
 
 Die Kante zwischen den beiden festen Einspannungen wird nicht optimiert und
 bleibt in beiden Methoden null. Die adaptive Lernrate wird mit
-`learning_rate_schedule` gewählt. `cos` verschiebt die Maxima sequenziell über
-Zustände, Balken, Knoten und – in Methode 2 – Adjazenzgewichte. Für einen
-Vergleichslauf kann die Konfiguration ohne Dateiänderung überschrieben werden:
+`learning_rate_schedule` gewählt. Standardmäßig wird `inverse_sqrt` verwendet
+und so normiert, dass jede Parametergruppe ihren konfigurierten Maximalwert
+erreicht. Die Maximalwerte für Zustände, Balken, Knoten und Adjazenz stehen
+getrennt in `config.toml`. Für einen Vergleichslauf kann die Konfiguration ohne
+Dateiänderung überschrieben werden:
 
 ```sh
 BEAM_LEARNING_RATE_SCHEDULE=inverse_sqrt \
