@@ -60,16 +60,21 @@ binary_gaussian_penalty(weights, sigma) = mean(
     TopologyBS.gaussfilter(weights, one(eltype(weights)) / 2, sigma))
 
 function scheduled_eta(schedule::Symbol, iteration, iterations, eta;
-                       phase=0.0, base=1e-5, peak=eta, period=iterations,
+                       phase=0.0, base=1e-5, period=iterations,
                        parameters=200, warmups=200)
     if schedule === :fixed
         eta
     elseif schedule === :inverse_sqrt
-        TopologyBS.learningrate(iteration, parameters, warmups)
+        peak_iteration = max(1, round(Int,
+            warmups^(3/2) / sqrt(parameters)))
+        raw = TopologyBS.learningrate(iteration, parameters, warmups)
+        normalizer = TopologyBS.learningrate(
+            peak_iteration, parameters, warmups)
+        eta * raw / normalizer
     elseif schedule === :cos
         actual_period = period > 0 ? period : iterations
         TopologyBS.cos_learningrate(
-            iteration, base, peak, actual_period, phase)
+            iteration, min(base, eta), eta, actual_period, phase)
     else
         throw(ArgumentError("unknown learning-rate schedule: $schedule"))
     end
@@ -317,7 +322,8 @@ end
 
 function optimize_fixed(model, parameters, weights, points, target, scales,
                         residual_weight; eta, iterations, schedule=:fixed,
-                        schedule_options=NamedTuple())
+                        schedule_options=NamedTuple(),
+                        learning_rates=(state=eta, beam=eta, node=eta))
     beams, nodes, states = parameters.beams, parameters.nodes, parameters.states
     beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
     node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
@@ -326,11 +332,11 @@ function optimize_fixed(model, parameters, weights, points, target, scales,
     phases = (beam=-2π/3, node=-4π/3, state=0.0)
     for iteration in 1:iterations
         beam_state = adjust_eta(beam_state, schedule, iteration, iterations,
-            eta, phases.beam; schedule_options...)
+            learning_rates.beam, phases.beam; schedule_options...)
         node_state = adjust_eta(node_state, schedule, iteration, iterations,
-            eta, phases.node; schedule_options...)
+            learning_rates.node, phases.node; schedule_options...)
         value_state = adjust_eta(value_state, schedule, iteration, iterations,
-            eta, phases.state; schedule_options...)
+            learning_rates.state, phases.state; schedule_options...)
         value, gradients = Zygote.withgradient(
             (x, y, z) -> study_loss(model, x, y, z, weights, points, target,
                                      scales, residual_weight),
@@ -348,7 +354,9 @@ end
 function optimize_relaxed(model, parameters, raw_weights, points, target,
                           scales, residual_weight, discreteness_weight;
                           eta, iterations, gaussian_sigma=0.15,
-                          schedule=:fixed, schedule_options=NamedTuple())
+                          schedule=:fixed, schedule_options=NamedTuple(),
+                          learning_rates=(state=eta, beam=eta, node=eta,
+                                          adjacency=eta))
     beams, nodes, states = parameters.beams, parameters.nodes, parameters.states
     beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
     node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
@@ -360,13 +368,13 @@ function optimize_relaxed(model, parameters, raw_weights, points, target,
     phases = (beam=-π/2, node=-π, state=0.0, weight=-3π/2)
     for iteration in 1:iterations
         beam_state = adjust_eta(beam_state, schedule, iteration, iterations,
-            eta, phases.beam; schedule_options...)
+            learning_rates.beam, phases.beam; schedule_options...)
         node_state = adjust_eta(node_state, schedule, iteration, iterations,
-            eta, phases.node; schedule_options...)
+            learning_rates.node, phases.node; schedule_options...)
         value_state = adjust_eta(value_state, schedule, iteration, iterations,
-            eta, phases.state; schedule_options...)
+            learning_rates.state, phases.state; schedule_options...)
         weight_state = adjust_eta(weight_state, schedule, iteration, iterations,
-            eta, phases.weight; schedule_options...)
+            learning_rates.adjacency, phases.weight; schedule_options...)
         geometry_value, geometry_gradients = Zygote.withgradient(
             (w, x, y) -> study_loss(
                 model, w, x, y, weights, points, target, scales,
@@ -409,10 +417,15 @@ function topology_study_case(kind, settings)
                           get(settings, "learning_rate_schedule", "fixed")))
     schedule_options = (
         base=Float32(get(settings, "learning_rate_base", 1e-5)),
-        peak=Float32(get(settings, "learning_rate_peak", 1e-2)),
         period=get(settings, "learning_rate_period", 0),
         parameters=get(settings, "learning_rate_parameters", 200),
         warmups=get(settings, "learning_rate_warmups", 200))
+    learning_rates = (
+        state=Float32(get(settings, "learning_rate_state_peak", 5e-3)),
+        beam=Float32(get(settings, "learning_rate_beam_peak", 1e-3)),
+        node=Float32(get(settings, "learning_rate_node_peak", 1e-3)),
+        adjacency=Float32(get(
+            settings, "learning_rate_adjacency_peak", 5e-4)))
 
     initial = (topology, rng) -> initial_parameters(rng, points)
     optimize = function(topology, parameters)
@@ -420,7 +433,9 @@ function topology_study_case(kind, settings)
         result = optimize_fixed(model, parameters, weights, points, target,
             scales, residual_weight; eta=Float32(settings["adam_method1_eta"]),
             iterations=settings["adam_method1_iterations"], schedule,
-            schedule_options)
+            schedule_options,
+            learning_rates=(; learning_rates.state, learning_rates.beam,
+                              learning_rates.node))
         final = response(model, result.beams, result.nodes, result.states,
                          weights, points)
         optimized = (; beams=result.beams, nodes=result.nodes,
@@ -445,7 +460,7 @@ function topology_study_case(kind, settings)
             eta=Float32(settings["adam_method2_eta"]),
             iterations=settings["adam_method2_iterations"],
             gaussian_sigma=Float32(settings["gaussian_sigma"]), schedule,
-            schedule_options)
+            schedule_options, learning_rates)
         relaxed_parameters = (; beams=result.beams, nodes=result.nodes,
                               states=result.states)
         relaxed_response = response(model, result.beams, result.nodes,
@@ -471,7 +486,9 @@ function topology_study_case(kind, settings)
             scales, residual_weight;
             eta=Float32(settings["adam_method1_eta"]),
             iterations=settings["adam_method1_iterations"], schedule,
-            schedule_options) : nothing
+            schedule_options,
+            learning_rates=(; learning_rates.state, learning_rates.beam,
+                              learning_rates.node)) : nothing
         final_parameters = isnothing(refined) ? relaxed_parameters :
             (; beams=refined.beams, nodes=refined.nodes, states=refined.states)
         final_weights = isnothing(refined) ? result.weights : discrete_weights
