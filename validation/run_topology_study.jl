@@ -43,6 +43,10 @@ minimum_degree = isempty(cases) ? 2 :
 
 topologies = enumerate_topologies(; n, clamp_nodes=clamps,
     branch_nodes=branches, minimum_branch_degree=minimum_degree)
+if !isempty(cases) && hasproperty(first(cases), :ignored_edges)
+    topologies = filter(
+        t -> all(!t.mask[i] for i in first(cases).ignored_edges), topologies)
+end
 
 points = settings["evaluation_points"]
 write_study_inputs(topologies, cases, points, output)
