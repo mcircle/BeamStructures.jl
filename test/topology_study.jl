@@ -107,8 +107,14 @@ end
     adjacency = weighted_adjacency(weights)
     @test issymmetric(adjacency)
     @test all(iszero, diag(adjacency))
-    @test adjacency[2, 1] == weights[1]
+    @test adjacency[2, 1] == 0
+    @test adjacency[3, 1] == weights[2]
     @test adjacency[5, 4] == weights[end]
+    active_adjacency = weighted_adjacency(weights[2:end])
+    @test active_adjacency == adjacency
+    @test scheduled_eta(:fixed, 1, 100, 0.01) == 0.01
+    @test isfinite(scheduled_eta(:cos, 1, 100, 0.01))
+    @test isfinite(scheduled_eta(:inverse_sqrt, 1, 100, 0.01))
 
     parameters = initial_parameters(MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0])
     @test keys(parameters.nodes) == NODE_NAMES
