@@ -42,9 +42,12 @@ adam_method1_eta = 1.0e-3
 adam_method1_iterations = 500
 adam_method2_eta = 1.0e-3
 adam_method2_iterations = 1000
-learning_rate_schedule = "cos"
+learning_rate_schedule = "inverse_sqrt"
 learning_rate_base = 1.0e-5
-learning_rate_peak = 1.0e-2
+learning_rate_state_peak = 5.0e-3
+learning_rate_beam_peak = 1.0e-3
+learning_rate_node_peak = 1.0e-3
+learning_rate_adjacency_peak = 5.0e-4
 # A value of zero uses the iteration count of the respective optimizer.
 learning_rate_period = 0
 learning_rate_parameters = 200
