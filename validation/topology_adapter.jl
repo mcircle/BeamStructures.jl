@@ -9,6 +9,8 @@ const MOVED_NODE = 5
 const FIXED_STIFFNESS_DOFS = [1, 2, 3, 4, 5, 6, 13, 15]
 const LOADED_STIFFNESS_DOFS = [14]
 const EDGE_LIST = Tuple(candidate_edges(NODE_COUNT))
+const IGNORED_EDGE_IDS = (1,)
+const OPTIMIZED_EDGE_IDS = Tuple(setdiff(eachindex(EDGE_LIST), IGNORED_EDGE_IDS))
 const EDGE_INDEX = [i == j ? 0 :
     findfirst(==((max(i, j), min(i, j))), EDGE_LIST)
     for i in 1:NODE_COUNT, j in 1:NODE_COUNT]
@@ -37,13 +39,48 @@ function target_characteristic(kind::Symbol, displacements; force_scale=10.0)
     hcat(fx, zero(fx), zero(fx))
 end
 
+function full_edge_weights(weights)
+    if length(weights) == length(EDGE_LIST)
+        allowed = map(i -> i in IGNORED_EDGE_IDS ? zero(eltype(weights)) :
+                      one(eltype(weights)), eachindex(EDGE_LIST))
+        return weights .* allowed
+    elseif length(weights) == length(OPTIMIZED_EDGE_IDS)
+        return vcat(zero(eltype(weights)), weights)
+    end
+    throw(DimensionMismatch("expected 9 optimized or 10 complete edge weights"))
+end
+
 function weighted_adjacency(weights)
-    bounded = clamp.(weights, zero(eltype(weights)), one(eltype(weights)))
+    complete = full_edge_weights(weights)
+    bounded = clamp.(complete, zero(eltype(complete)), one(eltype(complete)))
     dropdims(sum(reshape(bounded, 1, 1, :) .* EDGE_BASIS; dims=3); dims=3)
 end
 
 binary_gaussian_penalty(weights, sigma) = mean(
     TopologyBS.gaussfilter(weights, one(eltype(weights)) / 2, sigma))
+
+function scheduled_eta(schedule::Symbol, iteration, iterations, eta;
+                       phase=0.0, base=1e-5, peak=eta, period=iterations,
+                       parameters=200, warmups=200)
+    if schedule === :fixed
+        eta
+    elseif schedule === :inverse_sqrt
+        TopologyBS.learningrate(iteration, parameters, warmups)
+    elseif schedule === :cos
+        actual_period = period > 0 ? period : iterations
+        TopologyBS.cos_learningrate(
+            iteration, base, peak, actual_period, phase)
+    else
+        throw(ArgumentError("unknown learning-rate schedule: $schedule"))
+    end
+end
+
+function adjust_eta(state, schedule, iteration, iterations, eta, phase;
+                    schedule_options...)
+    value = scheduled_eta(schedule, iteration, iterations, eta;
+                          phase, schedule_options...)
+    Optimisers.adjust(state; eta=convert(typeof(eta), value))
+end
 
 function target_stiffness(target, points)
     n = length(points)
@@ -124,6 +161,7 @@ function moved_nodes(nodes, displacement)
 end
 
 function moved_reaction(solutions, beams, nodes, weights)
+    weights = full_edge_weights(weights)
     beam_ids = TopologyBS.getindices(NODE_COUNT)
     incident = TopologyBS.findbeamsatnode(nodes.Node_5, MOVED_NODE, beam_ids)[1]
     reaction = mapreduce(index -> weights[index] .* TopologyBS.scaleforce(
@@ -278,13 +316,21 @@ function initial_parameters(rng, points)
 end
 
 function optimize_fixed(model, parameters, weights, points, target, scales,
-                        residual_weight; eta, iterations)
+                        residual_weight; eta, iterations, schedule=:fixed,
+                        schedule_options=NamedTuple())
     beams, nodes, states = parameters.beams, parameters.nodes, parameters.states
     beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
     node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
     value_state = Optimisers.setup(Optimisers.Adam(eta), states)
 
-    for _ in 1:iterations
+    phases = (beam=-2π/3, node=-4π/3, state=0.0)
+    for iteration in 1:iterations
+        beam_state = adjust_eta(beam_state, schedule, iteration, iterations,
+            eta, phases.beam; schedule_options...)
+        node_state = adjust_eta(node_state, schedule, iteration, iterations,
+            eta, phases.node; schedule_options...)
+        value_state = adjust_eta(value_state, schedule, iteration, iterations,
+            eta, phases.state; schedule_options...)
         value, gradients = Zygote.withgradient(
             (x, y, z) -> study_loss(model, x, y, z, weights, points, target,
                                      scales, residual_weight),
@@ -301,7 +347,8 @@ end
 
 function optimize_relaxed(model, parameters, raw_weights, points, target,
                           scales, residual_weight, discreteness_weight;
-                          eta, iterations, gaussian_sigma=0.15)
+                          eta, iterations, gaussian_sigma=0.15,
+                          schedule=:fixed, schedule_options=NamedTuple())
     beams, nodes, states = parameters.beams, parameters.nodes, parameters.states
     beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
     node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
@@ -310,7 +357,16 @@ function optimize_relaxed(model, parameters, raw_weights, points, target,
                      one(eltype(raw_weights)))
     weight_state = Optimisers.setup(Optimisers.Adam(eta), weights)
 
-    for _ in 1:iterations
+    phases = (beam=-π/2, node=-π, state=0.0, weight=-3π/2)
+    for iteration in 1:iterations
+        beam_state = adjust_eta(beam_state, schedule, iteration, iterations,
+            eta, phases.beam; schedule_options...)
+        node_state = adjust_eta(node_state, schedule, iteration, iterations,
+            eta, phases.node; schedule_options...)
+        value_state = adjust_eta(value_state, schedule, iteration, iterations,
+            eta, phases.state; schedule_options...)
+        weight_state = adjust_eta(weight_state, schedule, iteration, iterations,
+            eta, phases.weight; schedule_options...)
         geometry_value, geometry_gradients = Zygote.withgradient(
             (w, x, y) -> study_loss(
                 model, w, x, y, weights, points, target, scales,
@@ -349,13 +405,22 @@ function topology_study_case(kind, settings)
         settings["target_force_scale"] * settings["grid_size"]))
     model = TopologyBS.GroundStructure()
     residual_weight = Float32(settings["equilibrium_weight"])
+    schedule = Symbol(get(ENV, "BEAM_LEARNING_RATE_SCHEDULE",
+                          get(settings, "learning_rate_schedule", "fixed")))
+    schedule_options = (
+        base=Float32(get(settings, "learning_rate_base", 1e-5)),
+        peak=Float32(get(settings, "learning_rate_peak", 1e-2)),
+        period=get(settings, "learning_rate_period", 0),
+        parameters=get(settings, "learning_rate_parameters", 200),
+        warmups=get(settings, "learning_rate_warmups", 200))
 
     initial = (topology, rng) -> initial_parameters(rng, points)
     optimize = function(topology, parameters)
         weights = Float32.(topology.mask)
         result = optimize_fixed(model, parameters, weights, points, target,
             scales, residual_weight; eta=Float32(settings["adam_method1_eta"]),
-            iterations=settings["adam_method1_iterations"])
+            iterations=settings["adam_method1_iterations"], schedule,
+            schedule_options)
         final = response(model, result.beams, result.nodes, result.states,
                          weights, points)
         optimized = (; beams=result.beams, nodes=result.nodes,
@@ -373,17 +438,20 @@ function topology_study_case(kind, settings)
     end
     method2 = function(rng)
         parameters = initial_parameters(rng, points)
-        raw_weights = fill(0.5f0, length(EDGE_LIST))
+        raw_weights = clamp.(0.5f0 .+ 0.01f0 .* randn(
+            rng, Float32, length(OPTIMIZED_EDGE_IDS)), 0f0, 1f0)
         result = optimize_relaxed(model, parameters, raw_weights, points, target,
             scales, residual_weight, Float32(settings["discreteness_weight"]);
             eta=Float32(settings["adam_method2_eta"]),
             iterations=settings["adam_method2_iterations"],
-            gaussian_sigma=Float32(settings["gaussian_sigma"]))
+            gaussian_sigma=Float32(settings["gaussian_sigma"]), schedule,
+            schedule_options)
         relaxed_parameters = (; beams=result.beams, nodes=result.nodes,
                               states=result.states)
         relaxed_response = response(model, result.beams, result.nodes,
                                     result.states, result.weights, points)
-        mask = result.weights .>= settings["topology_threshold"]
+        mask = full_edge_weights(result.weights) .>=
+               settings["topology_threshold"]
         discrete_weights = Float32.(mask)
         is_admissible = TopologyGeneration.is_admissible(mask;
             n=NODE_COUNT, clamp_nodes=CLAMP_NODES, branch_nodes=BRANCH_NODES,
@@ -402,7 +470,8 @@ function topology_study_case(kind, settings)
             model, relaxed_parameters, discrete_weights, points, target,
             scales, residual_weight;
             eta=Float32(settings["adam_method1_eta"]),
-            iterations=settings["adam_method1_iterations"]) : nothing
+            iterations=settings["adam_method1_iterations"], schedule,
+            schedule_options) : nothing
         final_parameters = isnothing(refined) ? relaxed_parameters :
             (; beams=refined.beams, nodes=refined.nodes, states=refined.states)
         final_weights = isnothing(refined) ? result.weights : discrete_weights
@@ -413,7 +482,8 @@ function topology_study_case(kind, settings)
                 refined.states, discrete_weights, points, target)
         optimization_objective = isnothing(refined) ? result.objective :
                                  refined.objective
-        bounded = clamp.(result.weights, 0f0, 1f0)
+        active_bounded = clamp.(result.weights, 0f0, 1f0)
+        bounded = full_edge_weights(active_bounded)
         (; mask, parameters=final_parameters,
            adjacency=weighted_adjacency(discrete_weights),
            continuous_adjacency=weighted_adjacency(bounded),
@@ -427,9 +497,11 @@ function topology_study_case(kind, settings)
            relaxed_stiffness_error, discrete_stiffness_error,
            refined_stiffness_error,
            gaussian_penalty=binary_gaussian_penalty(
-               bounded, Float32(settings["gaussian_sigma"])),
-           mean_binary_distance=mean(min.(bounded, 1f0 .- bounded)),
-           max_binary_distance=maximum(min.(bounded, 1f0 .- bounded)))
+               active_bounded, Float32(settings["gaussian_sigma"])),
+           mean_binary_distance=mean(min.(active_bounded,
+                                          1f0 .- active_bounded)),
+           max_binary_distance=maximum(min.(active_bounded,
+                                             1f0 .- active_bounded)))
     end
     admissible = mask -> TopologyGeneration.is_admissible(mask;
         n=NODE_COUNT, clamp_nodes=CLAMP_NODES, branch_nodes=BRANCH_NODES,
@@ -437,7 +509,7 @@ function topology_study_case(kind, settings)
 
     (name=String(kind), node_count=NODE_COUNT, clamp_nodes=CLAMP_NODES,
      branch_nodes=BRANCH_NODES, minimum_branch_degree=2, scales,
-     evaluation_points=points,
+     evaluation_points=points, ignored_edges=IGNORED_EDGE_IDS,
      target=displacements -> target_characteristic(kind, displacements;
          force_scale=settings["target_force_scale"]),
      initial, optimize, evaluate, method2, admissible)
