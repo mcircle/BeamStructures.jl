@@ -72,6 +72,10 @@ for name in readdir(output)
 end
 
 topologies = enumerate_topologies()
+if hasproperty(first(cases), :ignored_edges)
+    topologies = filter(
+        t -> all(!t.mask[i] for i in first(cases).ignored_edges), topologies)
+end
 points = settings["evaluation_points"]
 write_study_inputs(topologies, cases, points, output)
 record_environment(output; settings)
@@ -128,13 +132,23 @@ cleanup = lowercase(get(ENV, "BEAM_STUDY_CLEAN_SHARDS", "true")) in
           ("1", "true", "yes")
 if cleanup
     root_path = realpath(root)
-    output_path = abspath(output)
-    output_below_root = startswith(output_path,
-        root_path * string(Base.Filesystem.path_separator))
-    protected = (root_path == output_path || root_path == homedir() ||
-                 root_path == pwd() || dirname(root_path) == root_path ||
-                 output_below_root)
-    protected && error("refusing to remove unsafe shard directory: $root_path")
-    rm(root_path; recursive=true)
-    println("Removed merged shard directory $root_path")
+    shard_pattern = r"^(method1|method2)_(linear_progressive|saddle|valley)_\d{3}$"
+    shard_directories = unique(dirname.(files))
+    for directory in shard_directories
+        realpath(dirname(directory)) == root_path ||
+            error("unexpected shard location: $directory")
+        occursin(shard_pattern, basename(directory)) ||
+            error("unexpected shard directory name: $directory")
+        for name in readdir(directory)
+            path = joinpath(directory, name)
+            isfile(path) || continue
+            if name == "rows.jls" || endswith(name, ".csv") ||
+               endswith(name, ".jld2") ||
+               name in ("metadata.toml", "Manifest.toml")
+                rm(path)
+            end
+        end
+        isempty(readdir(directory)) && rm(directory)
+    end
+    println("Removed merged files from $(length(shard_directories)) shards")
 end
