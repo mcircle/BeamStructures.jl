@@ -143,6 +143,22 @@ verwenden `Optimisers.Adam`; Iterationszahl, Lernrate, Gleichgewichtsgewicht,
 Kraftskala und Schwellwert stehen in `config.toml`. Das Volumen wird weder
 berechnet noch bewertet.
 
+Die Kante zwischen den beiden festen Einspannungen wird nicht optimiert und
+bleibt in beiden Methoden null. Die adaptive Lernrate wird mit
+`learning_rate_schedule` gewählt. `cos` verschiebt die Maxima sequenziell über
+Zustände, Balken, Knoten und – in Methode 2 – Adjazenzgewichte. Für einen
+Vergleichslauf kann die Konfiguration ohne Dateiänderung überschrieben werden:
+
+```sh
+BEAM_LEARNING_RATE_SCHEDULE=inverse_sqrt \
+BEAM_STUDY_OUTPUT=validation/results/lsf_shards_inverse \
+BEAM_STUDY_MERGED_OUTPUT=validation/results/lsf_merged_inverse \
+  bash validation/lsf/submit_topology_study.sh
+```
+
+Zulässige Werte sind `fixed`, `inverse_sqrt` und `cos`. Für einen belastbaren
+Vergleich müssen die Varianten in getrennte Ergebnisverzeichnisse schreiben.
+
 Im Ergebnisordner liegen `topology_catalog.csv` sowie je Kennlinie
 `*_target.csv`, `*_method1_runs.csv`, `*_topology_summary.csv`,
 `*_method2_runs.csv` und `*_method2_comparison.csv`. Bei einem nicht
