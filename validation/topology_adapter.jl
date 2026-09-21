@@ -434,8 +434,9 @@ function topology_study_case(kind, settings)
             scales, residual_weight; eta=Float32(settings["adam_method1_eta"]),
             iterations=settings["adam_method1_iterations"], schedule,
             schedule_options,
-            learning_rates=(; learning_rates.state, learning_rates.beam,
-                              learning_rates.node))
+            learning_rates=(state=learning_rates.state,
+                            beam=learning_rates.beam,
+                            node=learning_rates.node))
         final = response(model, result.beams, result.nodes, result.states,
                          weights, points)
         optimized = (; beams=result.beams, nodes=result.nodes,
@@ -487,8 +488,9 @@ function topology_study_case(kind, settings)
             eta=Float32(settings["adam_method1_eta"]),
             iterations=settings["adam_method1_iterations"], schedule,
             schedule_options,
-            learning_rates=(; learning_rates.state, learning_rates.beam,
-                              learning_rates.node)) : nothing
+            learning_rates=(state=learning_rates.state,
+                            beam=learning_rates.beam,
+                            node=learning_rates.node)) : nothing
         final_parameters = isnothing(refined) ? relaxed_parameters :
             (; beams=refined.beams, nodes=refined.nodes, states=refined.states)
         final_weights = isnothing(refined) ? result.weights : discrete_weights
