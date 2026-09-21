@@ -115,6 +115,8 @@ end
     @test scheduled_eta(:fixed, 1, 100, 0.01) == 0.01
     @test isfinite(scheduled_eta(:cos, 1, 100, 0.01))
     @test isfinite(scheduled_eta(:inverse_sqrt, 1, 100, 0.01))
+    @test scheduled_eta(:inverse_sqrt, 200, 1000, 0.005;
+        parameters=200, warmups=200) ≈ 0.005
 
     parameters = initial_parameters(MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0])
     @test keys(parameters.nodes) == NODE_NAMES
