@@ -18,12 +18,16 @@ target = Float32.(target_characteristic(kind, points;
 
 parameters = initial_parameters(MersenneTwister(seed), points)
 model = TopologyBS.GroundStructure()
-weights = fill(0.5f0, length(EDGE_LIST))
+weights = fill(0.5f0, length(OPTIMIZED_EDGE_IDS))
 adjacency = weighted_adjacency(weights)
 
 all(diag(adjacency) .== 0) || error("adjacency diagonal is not zero")
-all(adjacency[.!Matrix{Bool}(I, NODE_COUNT, NODE_COUNT)] .== 0.5f0) ||
-    error("off-diagonal adjacency entries are not 0.5")
+adjacency[1, 2] == adjacency[2, 1] == 0f0 ||
+    error("the fixed-clamp edge must be zero")
+active_entries = [EDGE_LIST[i] for i in OPTIMIZED_EDGE_IDS]
+all(adjacency[i, j] == adjacency[j, i] == 0.5f0
+    for (j, i) in active_entries) ||
+    error("optimized off-diagonal adjacency entries are not 0.5")
 
 objective(a) = topology_stiffness_loss(
     model, parameters.beams, parameters.nodes, parameters.states,
@@ -33,7 +37,9 @@ forward_gradient = ForwardDiff.gradient(objective, weights)
 relative_error = norm(zygote_gradient - forward_gradient) /
                  max(norm(forward_gradient), eps(Float32))
 
-rows = [(edge=i, node_i=EDGE_LIST[i][1], node_j=EDGE_LIST[i][2],
+rows = [(edge=OPTIMIZED_EDGE_IDS[i],
+         node_i=EDGE_LIST[OPTIMIZED_EDGE_IDS[i]][1],
+         node_j=EDGE_LIST[OPTIMIZED_EDGE_IDS[i]][2],
          zygote=zygote_gradient[i], forwarddiff=forward_gradient[i],
          absolute_error=abs(zygote_gradient[i] - forward_gradient[i]))
         for i in eachindex(weights)]
