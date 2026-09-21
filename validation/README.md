@@ -113,7 +113,8 @@ Für jede Sollkennlinie und Methode wird dort zusätzlich die Datei
 `<kennlinie>_<methode>_best_solution.jld2` erzeugt. Sie enthält mindestens
 `beams`, `nodes`, `solution` und `adjacency`; für Methode 2 wird außerdem die
 kontinuierliche Adjazenzmatrix gespeichert. Nach einem vollständig erfolgreichen
-Merge wird `lsf_shards/` standardmäßig entfernt. Mit
+Merge werden die zusammengeführten Dateien aus den eindeutig erkannten
+Shard-Unterverzeichnissen standardmäßig entfernt. Mit
 `BEAM_STUDY_CLEAN_SHARDS=false` bleiben die Zwischenstände erhalten. Die
 LSF-Logs werden nicht automatisch gelöscht.
 Schlägt ein Array-Task fehl, startet der Merge wegen der LSF-Bedingung
