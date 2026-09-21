@@ -22,7 +22,7 @@ topology_method2_seeds = [
   181, 182, 183, 184, 185, 186, 187, 188, 189, 190,
   191, 192, 193, 194, 195, 196, 197, 198, 199, 200
 ]
-topology_residual_limit = 1.0e-6
+topology_residual_limit = 1.0e-2
 thresholds = [0.3, 0.5, 0.7]
 max_enumerated_edges = 10
 # Horizontal displacement of node 5 in mm (20 mm total span).
@@ -42,6 +42,13 @@ adam_method1_eta = 1.0e-3
 adam_method1_iterations = 500
 adam_method2_eta = 1.0e-3
 adam_method2_iterations = 1000
+learning_rate_schedule = "cos"
+learning_rate_base = 1.0e-5
+learning_rate_peak = 1.0e-2
+# A value of zero uses the iteration count of the respective optimizer.
+learning_rate_period = 0
+learning_rate_parameters = 200
+learning_rate_warmups = 200
 
 [Float32]
 atol = 1e-5
