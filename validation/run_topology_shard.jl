@@ -38,6 +38,10 @@ rows = if method == :method1
     topologies = enumerate_topologies(; n=case.node_count,
         clamp_nodes=case.clamp_nodes, branch_nodes=case.branch_nodes,
         minimum_branch_degree=case.minimum_branch_degree)
+    if hasproperty(case, :ignored_edges)
+        topologies = filter(t -> all(!t.mask[i] for i in case.ignored_edges),
+                            topologies)
+    end
     selected = topologies[shard_index:shard_count:end]
     isempty(selected) && error("method1 shard contains no topologies")
     seeds = get(settings, "topology_method1_seeds", settings["seeds"])
