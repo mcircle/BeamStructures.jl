@@ -487,6 +487,9 @@ function discrete_reduction_path(model, parameters, relaxed_weights,
     (; rows=annotated, pareto=annotated[pareto], best=annotated[selected_index])
 end
 
+env_int(name, default) = parse(Int, get(ENV, name, string(default)))
+env_float(name, default) = parse(Float32, get(ENV, name, string(default)))
+
 function topology_study_case(kind, settings)
     points = Float32.(settings["evaluation_points"])
     target = Float32.(target_characteristic(kind, points;
@@ -498,16 +501,27 @@ function topology_study_case(kind, settings)
     residual_weight = Float32(settings["equilibrium_weight"])
     schedule = Symbol(get(ENV, "BEAM_LEARNING_RATE_SCHEDULE",
                           get(settings, "learning_rate_schedule", "fixed")))
+    method1_iterations = env_int(
+        "BEAM_METHOD1_ITERATIONS", settings["adam_method1_iterations"])
+    method2_iterations = env_int(
+        "BEAM_METHOD2_ITERATIONS", settings["adam_method2_iterations"])
+    reduction_iterations = env_int(
+        "BEAM_REDUCTION_ITERATIONS",
+        get(settings, "reduction_iterations", method1_iterations))
+    learning_rate_scale = env_float("BEAM_LEARNING_RATE_SCALE", 1f0)
     schedule_options = (
         base=Float32(get(settings, "learning_rate_base", 1e-5)),
         period=get(settings, "learning_rate_period", 0),
         parameters=get(settings, "learning_rate_parameters", 200),
         warmups=get(settings, "learning_rate_warmups", 200))
     learning_rates = (
-        state=Float32(get(settings, "learning_rate_state_peak", 5e-3)),
-        beam=Float32(get(settings, "learning_rate_beam_peak", 1e-3)),
-        node=Float32(get(settings, "learning_rate_node_peak", 1e-3)),
-        adjacency=Float32(get(
+        state=learning_rate_scale *
+              Float32(get(settings, "learning_rate_state_peak", 5e-3)),
+        beam=learning_rate_scale *
+             Float32(get(settings, "learning_rate_beam_peak", 1e-3)),
+        node=learning_rate_scale *
+             Float32(get(settings, "learning_rate_node_peak", 1e-3)),
+        adjacency=learning_rate_scale * Float32(get(
             settings, "learning_rate_adjacency_peak", 5e-4)))
 
     initial = (topology, rng) -> initial_parameters(rng, points)
@@ -515,7 +529,7 @@ function topology_study_case(kind, settings)
         weights = Float32.(topology.mask)
         result = optimize_fixed(model, parameters, weights, points, target,
             scales, residual_weight; eta=Float32(settings["adam_method1_eta"]),
-            iterations=settings["adam_method1_iterations"], schedule,
+            iterations=method1_iterations, schedule,
             schedule_options,
             learning_rates=(state=learning_rates.state,
                             beam=learning_rates.beam,
@@ -542,7 +556,7 @@ function topology_study_case(kind, settings)
         result = optimize_relaxed(model, parameters, raw_weights, points, target,
             scales, residual_weight, Float32(settings["discreteness_weight"]);
             eta=Float32(settings["adam_method2_eta"]),
-            iterations=settings["adam_method2_iterations"],
+            iterations=method2_iterations,
             gaussian_sigma=Float32(settings["gaussian_sigma"]), schedule,
             schedule_options, learning_rates)
         relaxed_parameters = (; beams=result.beams, nodes=result.nodes,
@@ -557,8 +571,7 @@ function topology_study_case(kind, settings)
         reduction = discrete_reduction_path(model, relaxed_parameters,
             active_bounded, points, target, scales, residual_weight;
             eta=Float32(settings["adam_method1_eta"]),
-            iterations=get(settings, "reduction_iterations",
-                           settings["adam_method1_iterations"]),
+            iterations=reduction_iterations,
             residual_limit=settings["topology_residual_limit"], schedule,
             schedule_options,
             learning_rates=(state=learning_rates.state,
