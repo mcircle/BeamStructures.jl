@@ -6,30 +6,27 @@
 set -euo pipefail
 cd "${LS_SUBCWD:?LS_SUBCWD is not set}"
 
-method1_shards="${METHOD1_SHARDS:-24}"
+method1_shards="${METHOD1_SHARDS:-12}"
 method2_shards="${METHOD2_SHARDS:-5}"
-configurations=27
-method1_tasks=$((configurations * method1_shards))
-method2_tasks=$((configurations * method2_shards))
+phase="${PARAM_PHASE:?PARAM_PHASE must be method1, method2, or reduction}"
 task_zero=$((LSB_JOBINDEX - 1))
 
-if (( task_zero < method1_tasks )); then
-  phase="method1"
-  method="method1"
-  local_task=${task_zero}
-  shard_count=${method1_shards}
-elif (( task_zero < method1_tasks + method2_tasks )); then
-  phase="method2"
-  method="method2"
-  local_task=$((task_zero - method1_tasks))
-  shard_count=${method2_shards}
-else
-  phase="reduction"
-  method="method2"
-  local_task=$((task_zero - method1_tasks - method2_tasks))
-  shard_count=${method2_shards}
-fi
+case "${phase}" in
+  method1)
+    method="method1"
+    shard_count="${method1_shards}"
+    ;;
+  method2|reduction)
+    method="method2"
+    shard_count="${method2_shards}"
+    ;;
+  *)
+    echo "Invalid PARAM_PHASE: ${phase}" >&2
+    exit 2
+    ;;
+esac
 
+local_task="${task_zero}"
 config_zero=$((local_task / shard_count))
 shard_index=$((local_task % shard_count + 1))
 iteration_index=$((config_zero / 9))
