@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#BSUB -n 1
+#BSUB -W 24:00
+#BSUB -R "rusage[mem=4096]"
+
+set -euo pipefail
+cd "${LS_SUBCWD:?LS_SUBCWD is not set}"
+
+method1_shards="${METHOD1_SHARDS:-24}"
+method2_shards="${METHOD2_SHARDS:-5}"
+configurations=27
+method1_tasks=$((configurations * method1_shards))
+method2_tasks=$((configurations * method2_shards))
+task_zero=$((LSB_JOBINDEX - 1))
+
+if (( task_zero < method1_tasks )); then
+  phase="method1"
+  method="method1"
+  local_task=${task_zero}
+  shard_count=${method1_shards}
+elif (( task_zero < method1_tasks + method2_tasks )); then
+  phase="method2"
+  method="method2"
+  local_task=$((task_zero - method1_tasks))
+  shard_count=${method2_shards}
+else
+  phase="reduction"
+  method="method2"
+  local_task=$((task_zero - method1_tasks - method2_tasks))
+  shard_count=${method2_shards}
+fi
+
+config_zero=$((local_task / shard_count))
+shard_index=$((local_task % shard_count + 1))
+iteration_index=$((config_zero / 9))
+schedule_index=$(((config_zero % 9) / 3))
+rate_index=$((config_zero % 3))
+
+iterations=(500 1000 2000)
+schedules=(fixed inverse_sqrt cos)
+rate_scales=(0.5 1.0 2.0)
+rate_labels=(0p5 1p0 2p0)
+
+iteration="${iterations[${iteration_index}]}"
+schedule="${schedules[${schedule_index}]}"
+rate_scale="${rate_scales[${rate_index}]}"
+rate_label="${rate_labels[${rate_index}]}"
+
+case "${phase}" in
+  method1)
+    export BEAM_METHOD1_ITERATIONS="${iteration}"
+    export BEAM_METHOD2_ITERATIONS="${PARAM_METHOD2_BASE_ITERATIONS:-1000}"
+    export BEAM_REDUCTION_ITERATIONS="${PARAM_REDUCTION_BASE_ITERATIONS:-500}"
+    ;;
+  method2)
+    export BEAM_METHOD1_ITERATIONS="${PARAM_METHOD1_BASE_ITERATIONS:-500}"
+    export BEAM_METHOD2_ITERATIONS="${iteration}"
+    export BEAM_REDUCTION_ITERATIONS="${PARAM_REDUCTION_BASE_ITERATIONS:-500}"
+    ;;
+  reduction)
+    export BEAM_METHOD1_ITERATIONS="${PARAM_METHOD1_BASE_ITERATIONS:-500}"
+    export BEAM_METHOD2_ITERATIONS="${PARAM_METHOD2_BASE_ITERATIONS:-1000}"
+    export BEAM_REDUCTION_ITERATIONS="${iteration}"
+    ;;
+esac
+
+study_case="${PARAM_STUDY_CASE:-linear_progressive}"
+config_name="cfg_$((config_zero + 1))_${schedule}_i${iteration}_lr${rate_label}"
+output_root="${PARAM_STUDY_OUTPUT:-validation/results/parameter_study}"
+
+export BEAM_LEARNING_RATE_SCHEDULE="${schedule}"
+export BEAM_LEARNING_RATE_SCALE="${rate_scale}"
+export BEAM_STUDY_METHOD="${method}"
+export BEAM_STUDY_CASE="${study_case}"
+export BEAM_STUDY_SHARD_INDEX="${shard_index}"
+export BEAM_STUDY_SHARD_COUNT="${shard_count}"
+export BEAM_STUDY_OUTPUT="${output_root}/${phase}/${study_case}/${config_name}"
+
+julia --project=validation validation/run_topology_shard.jl
