@@ -49,7 +49,8 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
                 (parameters=(value=[1.0],), converged=true, residual=0.0),
             evaluate=(topology, parameters, points) ->
                 hcat(parameters.value[1].*points, zero(points), zero(points)),
-            method2=rng -> (mask=fixed_mask, converged=true, residual=0.0))
+            method2=(rng; zero_states=false) ->
+                (mask=fixed_mask, converged=true, residual=0.0))
 
         rows = TopologyEvaluation.optimize_topologies(selected, case;
             seeds=[1, 2], points=[-1.0, 0.0, 1.0], directory)
@@ -67,6 +68,11 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             seeds=1:3, edge_count=10, directory)
         @test length(method2) == 3
         @test length(unique(row.topology for row in method2)) == 1
+        @test all(row -> row.initialization == "random", method2)
+        zero_method2 = TopologyEvaluation.run_method2_initializations(case;
+            seeds=Int[], zero_state_seeds=[7], edge_count=10, directory)
+        @test length(zero_method2) == 1
+        @test only(zero_method2).initialization == "zero_state"
         comparison = TopologyEvaluation.compare_method2(summary, method2;
             directory, name=case.name)
         @test all(row -> row.gap == 0, comparison)
@@ -127,6 +133,9 @@ end
     @test parameters.nodes.Node_4 isa BS.Branch
     @test parameters.nodes.Node_5 isa BS.Clamp
     @test size(parameters.states) == (3, 12, 3)
+    zero_parameters = initial_parameters(
+        MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0]; zero_states=true)
+    @test all(iszero, zero_parameters.states)
 
     beam = parameters.beams.Beam_1
     beam_vector = Float32[beam...]
