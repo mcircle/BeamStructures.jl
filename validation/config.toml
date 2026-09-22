@@ -37,16 +37,26 @@ grid_size = 100.0
 target_force_scale = 10.0
 topology_threshold = 0.5
 equilibrium_weight = 10.0
+<<<<<<< Updated upstream
 # Report binarity, but do not force it during topology optimization.
 discreteness_weight = 0.0
-gaussian_sigma = 0.15
-adam_method1_eta = 1.0e-3
+gaussian_sigma = 0.3
+adam_method1_eta = 1.0e-2
 adam_method1_iterations = 500
-adam_method2_eta = 1.0e-3
-adam_method2_iterations = 1000
+adam_method2_eta = 1.0e-2
+adam_method2_iterations = 500
 # Fixed-topology re-optimization after each accepted edge removal.
 reduction_iterations = 500
 learning_rate_schedule = "inverse_sqrt"
+=======
+discreteness_weight = 0.0
+gaussian_sigma = 0.15
+adam_method1_eta = 1.0e-2
+adam_method1_iterations = 4000
+adam_method2_eta = 1.0e-2
+adam_method2_iterations = 500
+learning_rate_schedule = "cos"
+>>>>>>> Stashed changes
 learning_rate_base = 1.0e-5
 learning_rate_state_peak = 5.0e-3
 learning_rate_beam_peak = 1.0e-3
