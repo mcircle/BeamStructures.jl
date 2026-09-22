@@ -84,8 +84,9 @@ Der Test differenziert den vorgesehenen Pfad `admittance_matrix` →
 numerische Ableitung der Sollkennlinie. Die zehn unabhängigen Kanten starten
 bei 0,5; daraus entsteht eine symmetrische 5×5-Adjazenzmatrix mit Nullen auf
 der Diagonalen. Nach jedem Adam-Schritt werden die Kantenwerte mit `clamp` auf
-`[0,1]` begrenzt. Eine Gauß-Strafe mit Zentrum 0,5 und der in
-`gaussian_sigma` festgelegten Breite drängt Zwischenwerte zu 0 oder 1.
+`[0,1]` begrenzt. Gauß-Strafe und Binärdistanz werden als Diagnose
+protokolliert, beeinflussen die Optimierung bei
+`discreteness_weight = 0` jedoch nicht.
 
 ## LSF-Job-Array
 
@@ -138,10 +139,15 @@ Die Auslenkung läuft von -10 mm bis +10 mm. Es werden drei Sollkennlinien mit
 - Tal/negative Steifigkeit: `Fx/F0 = ξ³ - 0.55ξ`
 
 `Fy` und `Mz` sind jeweils null. Methode 1 optimiert jede graphisch zulässige
-binäre Adjazenzmatrix. Methode 2 optimiert kontinuierliche Kantenwerte und
-diskretisiert sie anschließend mit dem konfigurierten Schwellwert. Beide Wege
-verwenden `Optimisers.Adam`; Iterationszahl, Lernrate, Gleichgewichtsgewicht,
-Kraftskala und Schwellwert stehen in `config.toml`. Das Volumen wird weder
+binäre Adjazenzmatrix. Methode 2 optimiert kontinuierliche Kantenwerte als
+Relevanzmaß. Anschließend werden die Balken in aufsteigender Reihenfolge dieser
+Werte entfernt, sofern die Struktur zulässig bleibt. Geometrie und Zustände
+werden nach jedem akzeptierten Schritt erneut optimiert. Der gesamte
+Reduktionspfad mit Topologie, Balkenzahl, Kennlinienfehler, Residuum und
+Steifigkeitsfehler steht in `*_method2_runs.csv`. Zusätzlich wird je
+Sollkennlinie ein Lauf mit exakt null initialisierten Zuständen ausgeführt.
+Beide Wege verwenden `Optimisers.Adam`; Iterationszahlen, Lernraten und
+Gleichgewichtsgewicht stehen in `config.toml`. Das Volumen wird weder
 berechnet noch bewertet.
 
 Die Kante zwischen den beiden festen Einspannungen wird nicht optimiert und
