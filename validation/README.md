@@ -144,7 +144,10 @@ Relevanzmaß. Anschließend werden die Balken in aufsteigender Reihenfolge diese
 Werte entfernt, sofern die Struktur zulässig bleibt. Geometrie und Zustände
 werden nach jedem akzeptierten Schritt erneut optimiert. Der gesamte
 Reduktionspfad mit Topologie, Balkenzahl, Kennlinienfehler, Residuum und
-Steifigkeitsfehler steht in `*_method2_runs.csv`. Zusätzlich wird je
+Steifigkeitsfehler steht in `*_method2_runs.csv`. Nicht dominierte Lösungen
+werden als Pareto-Lösungen markiert. Falls ein einzelner Vorschlag benötigt
+wird, wird der Pareto-Punkt mit dem kleinsten normierten Abstand zum Idealpunkt
+aus Kennlinienfehler, Residuum und Balkenzahl gewählt. Zusätzlich wird je
 Sollkennlinie ein Lauf mit exakt null initialisierten Zuständen ausgeführt.
 Beide Wege verwenden `Optimisers.Adam`; Iterationszahlen, Lernraten und
 Gleichgewichtsgewicht stehen in `config.toml`. Das Volumen wird weder
