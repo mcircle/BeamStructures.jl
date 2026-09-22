@@ -193,10 +193,10 @@ und die diskrete Reduktion:
 - Lernratenfaktor: 0,5, 1 und 2
 
 Standardmäßig werden nur die linear-progressive Kennlinie, fünf Seeds und ein
-zusätzlicher Nullzustandslauf untersucht. Die drei Phasen werden als getrennte
-Arrays eingereicht, damit der zulässige LSF-Jobindex nicht überschritten wird.
-Mit zwölf Methode-1-Shards und fünf Methode-2-Shards entstehen Array-Größen von
-324, 135 und 135; pro Array laufen maximal 32 Tasks gleichzeitig:
+zusätzlicher Nullzustandslauf untersucht. Die 594 logischen Teilaufgaben werden
+auf einen festen Pool von 96 Array-Jobs verteilt. Jeder Worker bearbeitet
+mehrere Teilaufgaben nacheinander; dadurch werden nicht hunderte einzelne Jobs
+im Scheduler angelegt:
 
 ```sh
 bash validation/lsf/submit_parameter_study.sh
@@ -205,6 +205,7 @@ bash validation/lsf/submit_parameter_study.sh
 Die Parallelität und der Ausgabepfad können angepasst werden:
 
 ```sh
+PARAM_WORKERS=64 \
 MAX_CONCURRENT=64 \
 PARAM_STUDY_OUTPUT=validation/results/parameter_study_run1 \
   bash validation/lsf/submit_parameter_study.sh
