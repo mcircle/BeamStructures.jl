@@ -301,7 +301,8 @@ function run_method2_initializations(case; seeds, edge_count, directory,
                     continuous_adjacency=result.continuous_adjacency,
                     objective,
                     optimization_objective=result.optimization_objective,
-                    residual=result.residual, converged=result.converged)
+                    residual=result.residual, converged=result.converged,
+                    pareto_solutions=result.pareto_solutions)
                 if isnothing(best_candidate) ||
                    candidate_rank(candidate) < candidate_rank(best_candidate)
                     best_candidate = candidate
