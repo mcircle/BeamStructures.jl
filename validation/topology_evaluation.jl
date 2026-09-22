@@ -212,14 +212,22 @@ Run method 2 from multiple initializations. The adapter's method2(rng) returns
 (mask, converged, residual). Duplicate masks remain in the output so their
 frequency and initialization sensitivity can be measured.
 """
-function run_method2_initializations(case; seeds, edge_count, directory)
+function run_method2_initializations(case; seeds, edge_count, directory,
+                                     zero_state_seeds=Int[])
     rows = NamedTuple[]
     best_candidate = nothing
-    for seed in seeds
+    runs = vcat([(seed=Int(seed), initialization="random") for seed in seeds],
+                [(seed=Int(seed), initialization="zero_state")
+                 for seed in zero_state_seeds])
+    for run in runs
+        seed = run.seed
+        initialization = run.initialization
         elapsed = 0.0
         try
             result = nothing
-            elapsed = @elapsed result = case.method2(MersenneTwister(seed))
+            elapsed = @elapsed result = initialization == "zero_state" ?
+                case.method2(MersenneTwister(seed); zero_states=true) :
+                case.method2(MersenneTwister(seed))
             length(result.mask) == edge_count ||
                 throw(DimensionMismatch("method 2 returned the wrong mask length"))
             admissible = !hasproperty(case, :admissible) ||
@@ -234,7 +242,10 @@ function run_method2_initializations(case; seeds, edge_count, directory)
                 objective = curve_metrics(actual,
                     case.target(case.evaluation_points), case.scales).objective
             end
-            push!(rows, (seed, topology=topology_id(result.mask),
+            reduction = rich_result && hasproperty(result, :reduction_path) ?
+                        result.reduction_path : NamedTuple[]
+            push!(rows, (seed, initialization,
+                topology=topology_id(result.mask),
                 status, residual=result.residual,
                 relaxed_residual=rich_result ? result.relaxed_residual : missing,
                 objective,
@@ -254,6 +265,22 @@ function run_method2_initializations(case; seeds, edge_count, directory)
                 max_binary_distance=rich_result ?
                     result.max_binary_distance : missing,
                 weights=rich_result ? join(result.weights, ";") : "",
+                reduction_steps=length(reduction),
+                reduction_topologies=join(
+                    (topology_id(step.mask) for step in reduction), ";"),
+                reduction_elements=join(
+                    (count(step.mask) for step in reduction), ";"),
+                reduction_removed_edges=join(
+                    (step.removed_edge for step in reduction), ";"),
+                reduction_removed_weights=join(
+                    (ismissing(step.removed_weight) ? "" : step.removed_weight
+                     for step in reduction), ";"),
+                reduction_objectives=join(
+                    (step.curve_objective for step in reduction), ";"),
+                reduction_residuals=join(
+                    (step.residual for step in reduction), ";"),
+                reduction_stiffness_errors=join(
+                    (step.stiffness_error for step in reduction), ";"),
                 elements=count(result.mask), seconds=elapsed, message=""))
             if admissible && rich_result && has_solution(result.parameters)
                 candidate = (method=:method2, case_name=case.name, seed,
@@ -270,16 +297,20 @@ function run_method2_initializations(case; seeds, edge_count, directory)
                 end
             end
         catch err
-            push!(rows, (seed, topology="", status="failed", residual=missing,
-                relaxed_residual=missing, objective=missing,
+            push!(rows, (seed, initialization, topology="", status="failed",
+                residual=missing, relaxed_residual=missing, objective=missing,
                 optimization_objective=missing,
                 relaxed_optimization_objective=missing,
                 relaxed_stiffness_error=missing,
                 discrete_stiffness_error=missing,
                 refined_stiffness_error=missing, gaussian_penalty=missing,
                 mean_binary_distance=missing, max_binary_distance=missing,
-                weights="", elements=missing, seconds=elapsed,
-                message=sprint(showerror, err)))
+                weights="", reduction_steps=missing,
+                reduction_topologies="", reduction_elements="",
+                reduction_removed_edges="", reduction_removed_weights="",
+                reduction_objectives="", reduction_residuals="",
+                reduction_stiffness_errors="", elements=missing,
+                seconds=elapsed, message=sprint(showerror, err)))
         end
     end
     write_rows(joinpath(directory, "$(case.name)_method2_runs.csv"), rows)
