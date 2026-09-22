@@ -183,6 +183,35 @@ Steifigkeitsfehler vor Diskretisierung, direkt nach Diskretisierung und nach
 der festen Nachoptimierung mit Methode 1. Nur zulässige diskrete Topologien
 werden nachoptimiert und als beste Lösung berücksichtigt.
 
+## Parameterstudie auf Batch24
+
+Die Parameterstudie variiert getrennt für Methode 1, die relaxierte Methode 2
+und die diskrete Reduktion:
+
+- Iterationen: 500, 1000 und 2000
+- Schedule: `fixed`, `inverse_sqrt` und `cos`
+- Lernratenfaktor: 0,5, 1 und 2
+
+Standardmäßig werden nur die linear-progressive Kennlinie, fünf Seeds und ein
+zusätzlicher Nullzustandslauf untersucht. Mit 24 Methode-1-Shards und fünf
+Methode-2-Shards entstehen 918 Array-Tasks; maximal 64 laufen gleichzeitig:
+
+```sh
+bash validation/lsf/submit_parameter_study.sh
+```
+
+Die Parallelität und der Ausgabepfad können angepasst werden:
+
+```sh
+MAX_CONCURRENT=128 \
+PARAM_STUDY_OUTPUT=validation/results/parameter_study_run1 \
+  bash validation/lsf/submit_parameter_study.sh
+```
+
+Die Ergebnisse liegen getrennt nach Phase, Kennlinie und Parametersatz unter
+`PARAM_STUDY_OUTPUT`. Die jeweils nicht untersuchten Phasen verwenden
+`inverse_sqrt`, Lernratenfaktor 1 und die Basis-Iterationszahlen.
+
 ## Eigene Optimierungsfälle
 
 ```sh
