@@ -51,16 +51,34 @@ case "${phase}" in
     export BEAM_METHOD1_ITERATIONS="${iteration}"
     export BEAM_METHOD2_ITERATIONS="${PARAM_METHOD2_BASE_ITERATIONS:-1000}"
     export BEAM_REDUCTION_ITERATIONS="${PARAM_REDUCTION_BASE_ITERATIONS:-500}"
+    export BEAM_FIXED_SCHEDULE="${schedule}"
+    export BEAM_FIXED_LR_SCALE="${rate_scale}"
+    export BEAM_RELAXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+    export BEAM_RELAXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+    export BEAM_REDUCTION_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+    export BEAM_REDUCTION_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
     ;;
   method2)
     export BEAM_METHOD1_ITERATIONS="${PARAM_METHOD1_BASE_ITERATIONS:-500}"
     export BEAM_METHOD2_ITERATIONS="${iteration}"
     export BEAM_REDUCTION_ITERATIONS="${PARAM_REDUCTION_BASE_ITERATIONS:-500}"
+    export BEAM_FIXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+    export BEAM_FIXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+    export BEAM_RELAXED_SCHEDULE="${schedule}"
+    export BEAM_RELAXED_LR_SCALE="${rate_scale}"
+    export BEAM_REDUCTION_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+    export BEAM_REDUCTION_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
     ;;
   reduction)
     export BEAM_METHOD1_ITERATIONS="${PARAM_METHOD1_BASE_ITERATIONS:-500}"
     export BEAM_METHOD2_ITERATIONS="${PARAM_METHOD2_BASE_ITERATIONS:-1000}"
     export BEAM_REDUCTION_ITERATIONS="${iteration}"
+    export BEAM_FIXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+    export BEAM_FIXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+    export BEAM_RELAXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+    export BEAM_RELAXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+    export BEAM_REDUCTION_SCHEDULE="${schedule}"
+    export BEAM_REDUCTION_LR_SCALE="${rate_scale}"
     ;;
 esac
 
@@ -68,8 +86,6 @@ study_case="${PARAM_STUDY_CASE:-linear_progressive}"
 config_name="cfg_$((config_zero + 1))_${schedule}_i${iteration}_lr${rate_label}"
 output_root="${PARAM_STUDY_OUTPUT:-validation/results/parameter_study}"
 
-export BEAM_LEARNING_RATE_SCHEDULE="${schedule}"
-export BEAM_LEARNING_RATE_SCALE="${rate_scale}"
 export BEAM_STUDY_METHOD="${method}"
 export BEAM_STUDY_CASE="${study_case}"
 export BEAM_STUDY_SHARD_INDEX="${shard_index}"
