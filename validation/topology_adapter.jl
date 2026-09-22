@@ -453,9 +453,38 @@ function discrete_reduction_path(model, parameters, relaxed_weights,
         mask = candidate
         current = result.parameters
     end
-    rank(row) = (row.converged ? 0 : 1, row.curve_objective, row.residual)
-    best = rows[argmin(rank.(rows))]
-    (; rows, best)
+    elements(row) = count(row.mask)
+    dominates(a, b) =
+        a.curve_objective <= b.curve_objective &&
+        a.residual <= b.residual &&
+        elements(a) <= elements(b) &&
+        (a.curve_objective < b.curve_objective ||
+         a.residual < b.residual ||
+         elements(a) < elements(b))
+    pareto = map(eachindex(rows)) do i
+        !any(j -> j != i && dominates(rows[j], rows[i]), eachindex(rows))
+    end
+
+    function normalize_metric(values)
+        lo, hi = extrema(values)
+        hi == lo ? zeros(Float64, length(values)) :
+        Float64.((values .- lo) ./ (hi - lo))
+    end
+    pareto_indices = findall(pareto)
+    pareto_rows = rows[pareto_indices]
+    curve_score = normalize_metric(getproperty.(pareto_rows, :curve_objective))
+    residual_score = normalize_metric(getproperty.(pareto_rows, :residual))
+    element_score = normalize_metric(Float64.(elements.(pareto_rows)))
+    compromise_score = sqrt.(curve_score.^2 .+ residual_score.^2 .+
+                             element_score.^2)
+    selected_index = pareto_indices[argmin(compromise_score)]
+    score_by_index = Dict(pareto_indices .=> compromise_score)
+    annotated = map(eachindex(rows)) do i
+        (; rows[i]..., pareto=pareto[i],
+           selection_score=get(score_by_index, i, missing),
+           selected=i == selected_index)
+    end
+    (; rows=annotated, pareto=annotated[pareto], best=annotated[selected_index])
 end
 
 function topology_study_case(kind, settings)
@@ -550,6 +579,7 @@ function topology_study_case(kind, settings)
            discrete_stiffness_error=best.stiffness_error,
            refined_stiffness_error=best.stiffness_error,
            reduction_path=reduction.rows,
+           pareto_solutions=reduction.pareto,
            gaussian_penalty=binary_gaussian_penalty(
                active_bounded, Float32(settings["gaussian_sigma"])),
            mean_binary_distance=mean(min.(active_bounded,
