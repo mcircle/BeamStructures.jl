@@ -44,10 +44,14 @@ rows = if method == :method1
     end
     selected = topologies[shard_index:shard_count:end]
     isempty(selected) && error("method1 shard contains no topologies")
-    seeds = get(settings, "topology_method1_seeds", settings["seeds"])
+    seeds = haskey(ENV, "BEAM_METHOD1_SEEDS") ?
+        parse.(Int, split(ENV["BEAM_METHOD1_SEEDS"], ',')) :
+        get(settings, "topology_method1_seeds", settings["seeds"])
     optimize_topologies(selected, case; seeds, points, directory)
 else
-    seeds = get(settings, "topology_method2_seeds", collect(1:200))
+    seeds = haskey(ENV, "BEAM_METHOD2_SEEDS") ?
+        parse.(Int, split(ENV["BEAM_METHOD2_SEEDS"], ',')) :
+        get(settings, "topology_method2_seeds", collect(1:200))
     selected = seeds[shard_index:shard_count:end]
     isempty(selected) && error("method2 shard contains no seeds")
     zero_state_seeds = shard_index == 1 ?
