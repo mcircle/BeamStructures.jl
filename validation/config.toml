@@ -1,5 +1,6 @@
 seeds = [11, 29, 47]
 topology_method1_seeds = [11, 29, 47, 71, 97]
+topology_method2_zero_state_seeds = [1]
 topology_method2_seeds = [
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
   11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
@@ -36,12 +37,15 @@ grid_size = 100.0
 target_force_scale = 10.0
 topology_threshold = 0.5
 equilibrium_weight = 10.0
-discreteness_weight = 0.1
+# Report binarity, but do not force it during topology optimization.
+discreteness_weight = 0.0
 gaussian_sigma = 0.15
 adam_method1_eta = 1.0e-3
 adam_method1_iterations = 500
 adam_method2_eta = 1.0e-3
 adam_method2_iterations = 1000
+# Fixed-topology re-optimization after each accepted edge removal.
+reduction_iterations = 500
 learning_rate_schedule = "inverse_sqrt"
 learning_rate_base = 1.0e-5
 learning_rate_state_peak = 5.0e-3
