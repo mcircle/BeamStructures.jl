@@ -50,7 +50,9 @@ else
     seeds = get(settings, "topology_method2_seeds", collect(1:200))
     selected = seeds[shard_index:shard_count:end]
     isempty(selected) && error("method2 shard contains no seeds")
-    run_method2_initializations(case; seeds=selected,
+    zero_state_seeds = shard_index == 1 ?
+        get(settings, "topology_method2_zero_state_seeds", Int[]) : Int[]
+    run_method2_initializations(case; seeds=selected, zero_state_seeds,
         edge_count=length(candidate_edges(case.node_count)), directory)
 end
 
