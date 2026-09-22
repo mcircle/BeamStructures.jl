@@ -12,6 +12,7 @@ settings = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
 settings["evaluation_points"] = [-10.0, 10.0]
 settings["adam_method1_iterations"] = 1
 settings["adam_method2_iterations"] = 1
+settings["reduction_iterations"] = 1
 
 include("topology_adapter.jl")
 
