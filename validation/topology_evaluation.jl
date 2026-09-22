@@ -34,7 +34,9 @@ function save_best_candidate(directory, candidate)
         seed=candidate.seed, topology=candidate.topology,
         objective=candidate.objective,
         optimization_objective=candidate.optimization_objective,
-        residual=candidate.residual, converged=candidate.converged)
+        residual=candidate.residual, converged=candidate.converged,
+        pareto_solutions=hasproperty(candidate, :pareto_solutions) ?
+                         candidate.pareto_solutions : missing)
     path
 end
 
@@ -156,7 +158,9 @@ function optimize_topologies(topologies, case; seeds, points, directory)
                     continuous_adjacency=topology.adjacency,
                     objective=metric.objective,
                     optimization_objective,
-                    residual=result.residual, converged=result.converged)
+                    residual=result.residual, converged=result.converged,
+                    pareto_solutions=hasproperty(result, :pareto_solutions) ?
+                                     result.pareto_solutions : missing)
                 if isnothing(best_candidate) ||
                    candidate_rank(candidate) < candidate_rank(best_candidate)
                     best_candidate = candidate
@@ -281,6 +285,13 @@ function run_method2_initializations(case; seeds, edge_count, directory,
                     (step.residual for step in reduction), ";"),
                 reduction_stiffness_errors=join(
                     (step.stiffness_error for step in reduction), ";"),
+                reduction_pareto=join(
+                    (step.pareto for step in reduction), ";"),
+                reduction_selection_scores=join(
+                    (ismissing(step.selection_score) ? "" :
+                     step.selection_score for step in reduction), ";"),
+                selected_reduction_step=isempty(reduction) ? missing :
+                    only(step.step for step in reduction if step.selected),
                 elements=count(result.mask), seconds=elapsed, message=""))
             if admissible && rich_result && has_solution(result.parameters)
                 candidate = (method=:method2, case_name=case.name, seed,
@@ -309,7 +320,9 @@ function run_method2_initializations(case; seeds, edge_count, directory,
                 reduction_topologies="", reduction_elements="",
                 reduction_removed_edges="", reduction_removed_weights="",
                 reduction_objectives="", reduction_residuals="",
-                reduction_stiffness_errors="", elements=missing,
+                reduction_stiffness_errors="", reduction_pareto="",
+                reduction_selection_scores="", selected_reduction_step=missing,
+                elements=missing,
                 seconds=elapsed, message=sprint(showerror, err)))
         end
     end
