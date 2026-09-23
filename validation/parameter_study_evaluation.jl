@@ -4,6 +4,7 @@ using CairoMakie
 using CSV
 using DataFrames
 using LaTeXStrings
+using Printf
 using Statistics
 
 export evaluate_parameter_study
@@ -174,7 +175,7 @@ function selected_parameters(summary)
             normalized(candidates.total_seconds).^2)
         index = argmin(score)
         row = candidates[index, :]
-        push!(output, (
+        push!(output, (;
             phase,
             config=Int(row.config),
             schedule=String(row.schedule),
