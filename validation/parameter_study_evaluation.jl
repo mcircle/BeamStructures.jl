@@ -202,6 +202,8 @@ function plot_pareto(data, output_path)
         orientation=:horizontal, tellwidth=false)
 
     save(output_path * ".pdf", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".eps", figure)
     save(output_path * ".png", figure; px_per_unit=2)
     figure
 end
