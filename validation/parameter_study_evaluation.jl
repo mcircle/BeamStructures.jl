@@ -97,6 +97,60 @@ function plot_heatmaps(summary, metric, output_path; colorbar_label)
     figure
 end
 
+function risk_heatmap_values(table, phase, schedule, metric,
+                             iterations, rates, transform)
+    values = fill(NaN, length(iterations), length(rates))
+    selected = table[(table.phase .== phase) .&
+                     (table.schedule .== schedule), :]
+    for (i, iteration) in pairs(iterations), (j, rate) in pairs(rates)
+        row = selected[(selected.iterations .== iteration) .&
+                       isapprox.(selected.learning_rate_scale, rate), :]
+        nrow(row) == 1 || continue
+        value = row[1, metric]
+        isfinitevalue(value) || continue
+        values[i, j] = transform(Float64(value))
+    end
+    values
+end
+
+function plot_stiffness_risk_heatmaps(summary, metric, output_path;
+                                      colorbar_label, transform=identity,
+                                      annotation=value -> @sprintf("%.2f", value))
+    phases = ["method2", "reduction"]
+    iterations = sort(unique(Int.(summary.iterations)))
+    rates = sort(unique(Float64.(summary.learning_rate_scale)))
+    raw_values = [transform(Float64(value)) for value in summary[!, metric]
+                  if isfinitevalue(value)]
+    isempty(raw_values) && return nothing
+    lo, hi = extrema(raw_values)
+    colorrange = lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)
+    figure = Figure(size=(1180, 590))
+    plotted = nothing
+    for (row, phase) in pairs(phases), (column, schedule) in pairs(SCHEDULES)
+        axis = Axis(figure[row, column],
+            xlabel=L"\mathrm{Iterationszahl}\;N_{\mathrm{iter}}",
+            ylabel=L"\mathrm{Lernratenfaktor}\;c_{\eta}",
+            title="$(PHASE_LABELS[phase]) — $(schedule)",
+            xticks=iterations, yticks=rates)
+        values = risk_heatmap_values(summary, phase, schedule, metric,
+                                     iterations, rates, transform)
+        plotted = heatmap!(axis, iterations, rates, values;
+            colormap=:magma, colorrange)
+        for i in eachindex(iterations), j in eachindex(rates)
+            isfinite(values[i, j]) || continue
+            text!(axis, iterations[i], rates[j];
+                text=annotation(values[i, j]),
+                align=(:center, :center), color=:white, fontsize=11)
+        end
+    end
+    Colorbar(figure[:, 4], plotted; label=colorbar_label)
+    save(output_path * ".pdf", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".eps", figure)
+    save(output_path * ".png", figure; px_per_unit=2)
+    figure
+end
+
 function plot_tradeoff(summary, output_path)
     data = finite_rows(summary,
         [:median_residual, :median_objective, :total_seconds])
@@ -303,10 +357,24 @@ function selected_parameters(summary)
         isempty(candidates) && continue
         no_failures = candidates[candidates.failed .== 0, :]
         isempty(no_failures) || (candidates = no_failures)
-        score = sqrt.(
-            normalized(candidates.median_objective).^2 .+
-            normalized(candidates.median_residual).^2 .+
-            normalized(candidates.total_seconds).^2)
+        score_components = [
+            normalized(candidates.median_objective),
+            normalized(candidates.median_residual),
+            normalized(candidates.total_seconds),
+        ]
+        stiffness_available =
+            :p90_stiffness_error in propertynames(candidates) &&
+            :stiffness_error_rate_gt1 in propertynames(candidates) &&
+            all(isfinitevalue, candidates.p90_stiffness_error) &&
+            all(isfinitevalue, candidates.stiffness_error_rate_gt1)
+        if stiffness_available
+            push!(score_components,
+                normalized(log1p.(Float64.(candidates.p90_stiffness_error))))
+            push!(score_components,
+                normalized(candidates.stiffness_error_rate_gt1))
+        end
+        score = sqrt.(reduce(+, component .^ 2
+                             for component in score_components))
         index = argmin(score)
         row = candidates[index, :]
         push!(output, (;
@@ -319,6 +387,12 @@ function selected_parameters(summary)
             median_residual=Float64(row.median_residual),
             total_seconds=Float64(row.total_seconds),
             failed=Int(row.failed),
+            p90_stiffness_error=stiffness_available ?
+                Float64(row.p90_stiffness_error) : missing,
+            stiffness_error_rate_gt1=stiffness_available ?
+                Float64(row.stiffness_error_rate_gt1) : missing,
+            stiffness_error_rate_gt10=stiffness_available ?
+                Float64(row.stiffness_error_rate_gt10) : missing,
             selection_score=score[index],
         ))
     end
@@ -360,6 +434,9 @@ function evaluate_parameter_study(input_directory::AbstractString,
     require_columns(summary, [
         :phase, :config, :schedule, :iterations, :learning_rate_scale,
         :median_objective, :median_residual, :total_seconds, :failed,
+        :median_stiffness_error, :p90_stiffness_error,
+        :maximum_stiffness_error, :stiffness_error_rate_gt1,
+        :stiffness_error_rate_gt10,
     ])
 
     mkpath(output_directory)
@@ -374,6 +451,14 @@ function evaluate_parameter_study(input_directory::AbstractString,
         colorbar_label=L"\log_{10}(\mathrm{medianes\ Residuum})")
     plot_tradeoff(summary,
         joinpath(output_directory, "parameter_tradeoff"))
+    plot_stiffness_risk_heatmaps(summary, :p90_stiffness_error,
+        joinpath(output_directory, "parameter_heatmap_stiffness_p90");
+        colorbar_label=L"\log_{10}(Q_{0.9}(e_k))",
+        transform=log_metric)
+    plot_stiffness_risk_heatmaps(summary, :stiffness_error_rate_gt1,
+        joinpath(output_directory, "parameter_heatmap_stiffness_outlier_rate");
+        colorbar_label=L"\mathrm{Anteil}\;e_k>1",
+        annotation=value -> @sprintf("%.0f%%", 100value))
 
     method2_path = joinpath(input_directory, "method2_runs.csv")
     if isfile(method2_path)
