@@ -174,8 +174,8 @@ function plot_initializations(runs, output_path)
 
     figure = Figure(size=(900, 420))
     metrics = [
-        (:objective, L"\\mathrm{Kennlinienfehler}\\;J_{\\mathrm{curve}}"),
-        (:residual, L"\\mathrm{Gleichgewichtsresiduum}\\;r_{\\mathrm{RMS}}"),
+        (:objective, L"\mathrm{Kennlinienfehler}\;J_{\mathrm{curve}}"),
+        (:residual, L"\mathrm{Gleichgewichtsresiduum}\;r_{\mathrm{RMS}}"),
     ]
     for (column, (metric, ylabel)) in pairs(metrics)
         axis = Axis(figure[1, column];
