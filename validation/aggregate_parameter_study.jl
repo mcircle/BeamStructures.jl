@@ -43,6 +43,32 @@ function numeric_summary(rows, property)
          mean=mean(values), maximum=maximum(values))
 end
 
+function stiffness_summary(rows)
+    values = Float64[]
+    properties = (:refined_stiffness_error, :discrete_stiffness_error,
+                  :stiffness_error)
+    for row in rows
+        for property in properties
+            hasproperty(row, property) || continue
+            value = getproperty(row, property)
+            if finite_value(value)
+                push!(values, Float64(value))
+                break
+            end
+        end
+    end
+    isempty(values) && return (
+        median=missing, p90=missing, maximum=missing,
+        rate_gt1=missing, rate_gt10=missing)
+    (
+        median=median(values),
+        p90=quantile(values, 0.9),
+        maximum=maximum(values),
+        rate_gt1=count(>(1.0), values) / length(values),
+        rate_gt10=count(>(10.0), values) / length(values),
+    )
+end
+
 function summarize(grouped)
     output = NamedTuple[]
     for (key, rows) in grouped
@@ -53,6 +79,7 @@ function summarize(grouped)
         statuses = hasproperty(first(rows), :status) ?
                    getproperty.(rows, :status) : fill("", length(rows))
         elements = numeric_summary(rows, :elements)
+        stiffness = stiffness_summary(rows)
         push!(output, (
             phase=key.phase, case_name=key.case_name,
             config=key.config, schedule=key.schedule,
@@ -71,6 +98,11 @@ function summarize(grouped)
             mean_residual=residual.mean,
             median_relaxed_residual=relaxed_residual.median,
             median_elements=elements.median,
+            median_stiffness_error=stiffness.median,
+            p90_stiffness_error=stiffness.p90,
+            maximum_stiffness_error=stiffness.maximum,
+            stiffness_error_rate_gt1=stiffness.rate_gt1,
+            stiffness_error_rate_gt10=stiffness.rate_gt10,
             total_seconds=isempty(rows) ? missing :
                 sum(Float64(getproperty(row, :seconds)) for row in rows
                     if hasproperty(row, :seconds) &&
