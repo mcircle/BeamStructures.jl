@@ -27,7 +27,15 @@ const ITERATION_MARKERS = Dict(
     2000 => :utriangle,
 )
 
-isfinitevalue(value) = !ismissing(value) && value isa Number && isfinite(value)
+function numeric_value(value)
+    ismissing(value) && return NaN
+    value isa Number && return numeric_value(value)
+    value isa AbstractString || return NaN
+    parsed = tryparse(Float64, value)
+    isnothing(parsed) ? NaN : parsed
+end
+
+isfinitevalue(value) = isfinite(numeric_value(value))
 
 function require_columns(table, names)
     missing_names = setdiff(Symbol.(names), propertynames(table))
@@ -44,7 +52,7 @@ function finite_rows(table, columns)
 end
 
 function log_metric(value)
-    isfinitevalue(value) && value > 0 ? log10(Float64(value)) : NaN
+    isfinitevalue(value) && value > 0 ? log10(numeric_value(value)) : NaN
 end
 
 function metric_range(table, metric)
@@ -108,7 +116,7 @@ function risk_heatmap_values(table, phase, schedule, metric,
         nrow(row) == 1 || continue
         value = row[1, metric]
         isfinitevalue(value) || continue
-        values[i, j] = transform(Float64(value))
+        values[i, j] = transform(numeric_value(value))
     end
     values
 end
@@ -120,7 +128,7 @@ function plot_stiffness_risk_heatmaps(summary, metric, output_path;
     iterations = sort(unique(Int.(summary.iterations)))
     rates = sort(unique(Float64.(summary.learning_rate_scale)))
     raw_values = filter(isfinite,
-        [transform(Float64(value)) for value in summary[!, metric]
+        [transform(numeric_value(value)) for value in summary[!, metric]
          if isfinitevalue(value)])
     isempty(raw_values) && return nothing
     lo, hi = extrema(raw_values)
@@ -345,7 +353,7 @@ function plot_pareto(data, output_path)
 end
 
 function normalized(values)
-    values = Float64.(values)
+    values = numeric_value.(values)
     lo, hi = extrema(values)
     hi == lo ? zeros(length(values)) : (values .- lo) ./ (hi - lo)
 end
@@ -370,7 +378,7 @@ function selected_parameters(summary)
             all(isfinitevalue, candidates.stiffness_error_rate_gt1)
         if stiffness_available
             push!(score_components,
-                normalized(log1p.(Float64.(candidates.p90_stiffness_error))))
+                normalized(log1p.(numeric_value.(candidates.p90_stiffness_error))))
             push!(score_components,
                 normalized(candidates.stiffness_error_rate_gt1))
         end
@@ -389,11 +397,11 @@ function selected_parameters(summary)
             total_seconds=Float64(row.total_seconds),
             failed=Int(row.failed),
             p90_stiffness_error=stiffness_available ?
-                Float64(row.p90_stiffness_error) : missing,
+                numeric_value(row.p90_stiffness_error) : missing,
             stiffness_error_rate_gt1=stiffness_available ?
-                Float64(row.stiffness_error_rate_gt1) : missing,
+                numeric_value(row.stiffness_error_rate_gt1) : missing,
             stiffness_error_rate_gt10=stiffness_available ?
-                Float64(row.stiffness_error_rate_gt10) : missing,
+                numeric_value(row.stiffness_error_rate_gt10) : missing,
             selection_score=score[index],
         ))
     end
