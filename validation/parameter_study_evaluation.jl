@@ -134,25 +134,73 @@ function plot_tradeoff(summary, output_path)
     figure
 end
 
-function plot_pareto(pareto, output_path)
+function global_pareto_points(pareto)
     data = finite_rows(pareto, [:elements, :objective, :residual])
+    isempty(data) && return data
+    dominates(a, b) =
+        a.elements <= b.elements &&
+        a.objective <= b.objective &&
+        a.residual <= b.residual &&
+        (a.elements < b.elements ||
+         a.objective < b.objective ||
+         a.residual < b.residual)
+    global_front = map(1:nrow(data)) do i
+        !any(j -> j != i && dominates(data[j, :], data[i, :]),
+             1:nrow(data))
+    end
+    data.global_pareto = global_front
+    data
+end
+
+pareto_markers(data) = [
+    coalesce(selected, false) ? :star5 : :circle
+    for selected in data.selected
+]
+
+function plot_pareto(data, output_path)
     isempty(data) && return nothing
     figure = Figure(size=(760, 500))
     axis = Axis(figure[1, 1],
         xlabel=L"\mathrm{Anzahl\ der\ Balkenelemente}\;n_b",
         ylabel=L"\mathrm{Kennlinienfehler}\;J_{\mathrm{curve}}",
-        title="Pareto-Lösungen der sequenziellen Topologiereduktion")
+        title="Lokale und globale Pareto-Lösungen der Topologiereduktion")
+
     residuals = Float64.(data.residual)
-    plotted = scatter!(axis, Float64.(data.elements),
-        Float64.(data.objective);
-        color=residuals, colormap=:plasma, markersize=12)
-    selected = data[coalesce.(data.selected, false), :]
-    isempty(selected) || scatter!(axis, Float64.(selected.elements),
-        Float64.(selected.objective);
-        marker=:star5, markersize=22, color=:transparent,
-        strokecolor=:black, strokewidth=2)
+    colorrange = extrema(residuals)
+    colorrange = colorrange[1] == colorrange[2] ?
+        (colorrange[1] - eps(), colorrange[2] + eps()) : colorrange
+    local_data = data[.!data.global_pareto, :]
+    global_data = data[data.global_pareto, :]
+
+    if !isempty(local_data)
+        scatter!(axis, Float64.(local_data.elements),
+            Float64.(local_data.objective);
+            color=Float64.(local_data.residual), colorrange,
+            colormap=:plasma, marker=pareto_markers(local_data),
+            markersize=[coalesce(value, false) ? 18 : 10
+                        for value in local_data.selected],
+            alpha=0.3)
+    end
+    plotted = scatter!(axis, Float64.(global_data.elements),
+        Float64.(global_data.objective);
+        color=Float64.(global_data.residual), colorrange,
+        colormap=:plasma, marker=pareto_markers(global_data),
+        markersize=[coalesce(value, false) ? 22 : 14
+                    for value in global_data.selected],
+        strokecolor=:black, strokewidth=1.5)
+
     Colorbar(figure[1, 2], plotted;
         label=L"\mathrm{Gleichgewichtsresiduum}\;r_{\mathrm{RMS}}")
+    Legend(figure[2, 1:2],
+        [MarkerElement(marker=:circle, color=(:gray, 0.3)),
+         MarkerElement(marker=:circle, color=:gray,
+                       strokecolor=:black, strokewidth=1.5),
+         MarkerElement(marker=:star5, color=:gray,
+                       strokecolor=:black, strokewidth=1.5)],
+        ["lokal Pareto-optimal", "global Pareto-optimal",
+         "ausgewählter Vorschlag"];
+        orientation=:horizontal, tellwidth=false)
+
     save(output_path * ".pdf", figure)
     save(output_path * ".png", figure; px_per_unit=2)
     figure
@@ -247,7 +295,11 @@ function evaluate_parameter_study(input_directory::AbstractString,
     pareto_path = joinpath(input_directory, "parameter_study_pareto.csv")
     if isfile(pareto_path)
         pareto = CSV.read(pareto_path, DataFrame)
-        plot_pareto(pareto, joinpath(output_directory, "reduction_pareto"))
+        global_pareto = global_pareto_points(pareto)
+        CSV.write(joinpath(output_directory, "global_pareto.csv"),
+                  global_pareto)
+        plot_pareto(global_pareto,
+                    joinpath(output_directory, "reduction_pareto"))
     end
 
     selected = selected_parameters(summary)
