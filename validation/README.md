@@ -239,7 +239,8 @@ Unter `validation/results/parameter_study/evaluation/` entstehen:
 
 - Heatmaps für Kennlinienfehler und Gleichgewichtsresiduum als PDF und PNG,
 - das Trade-off-Diagramm aus Kennlinienfehler und Residuum,
-- das Pareto-Diagramm der Topologiereduktion,
+- das Pareto-Diagramm der Topologiereduktion mit lokalen und globalen Frontpunkten,
+- `global_pareto.csv` mit der globalen Dominanzprüfung über alle Läufe,
 - `selected_parameters.csv` und `selected_parameters.tex` für den Haupttext,
 - `appendix_parameter_table.csv` mit allen Parameterkonfigurationen.
 
