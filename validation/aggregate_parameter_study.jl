@@ -191,10 +191,20 @@ isdir(root) || error("parameter-study root does not exist: $root")
 
 row_files = String[]
 solution_files = String[]
-for (directory, _, files) in walkdir(root), name in files
-    path = joinpath(directory, name)
-    name == "rows.jls" && push!(row_files, path)
-    endswith(name, "_best_solution.jld2") && push!(solution_files, path)
+output_prefix = joinpath(output, "")
+for (directory, subdirectories, files) in walkdir(root)
+    absolute_directory = abspath(directory)
+    if absolute_directory == output ||
+       startswith(absolute_directory, output_prefix)
+        empty!(subdirectories)
+        continue
+    end
+    for name in files
+        path = joinpath(directory, name)
+        name == "rows.jls" && push!(row_files, path)
+        endswith(name, "_best_solution.jld2") &&
+            push!(solution_files, path)
+    end
 end
 isempty(row_files) && error("no rows.jls files found below $root")
 
