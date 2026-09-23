@@ -205,7 +205,7 @@ end
 mkpath(output)
 for phase in ("method1", "method2", "reduction")
     rows = all_rows[phase]
-    isempty(rows) || write_rows(joinpath(output, "${phase}_runs.csv"), rows)
+    isempty(rows) || write_rows(joinpath(output, "$(phase)_runs.csv"), rows)
 end
 summary = summarize(grouped)
 write_rows(joinpath(output, "parameter_study_summary.csv"), summary)
@@ -234,7 +234,7 @@ for file in solution_files
 end
 for (phase, (metadata, source)) in best
     destination = joinpath(best_directory,
-        "${phase}_${metadata.case_name}_best_solution.jld2")
+        "$(phase)_$(metadata.case_name)_best_solution.jld2")
     cp(source, destination; force=true)
 end
 
