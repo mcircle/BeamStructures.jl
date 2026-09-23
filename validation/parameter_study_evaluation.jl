@@ -29,7 +29,7 @@ const ITERATION_MARKERS = Dict(
 
 function numeric_value(value)
     ismissing(value) && return NaN
-    value isa Number && return numeric_value(value)
+    value isa Number && return Float64(value)
     value isa AbstractString || return NaN
     parsed = tryparse(Float64, value)
     isnothing(parsed) ? NaN : parsed
