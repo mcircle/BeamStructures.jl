@@ -52,7 +52,8 @@ function finite_rows(table, columns)
 end
 
 function log_metric(value)
-    isfinitevalue(value) && value > 0 ? log10(numeric_value(value)) : NaN
+    numeric = numeric_value(value)
+    isfinite(numeric) && numeric > 0 ? log10(numeric) : NaN
 end
 
 function metric_range(table, metric)
