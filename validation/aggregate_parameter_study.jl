@@ -191,15 +191,10 @@ isdir(root) || error("parameter-study root does not exist: $root")
 
 row_files = String[]
 solution_files = String[]
-output_prefix = joinpath(output, "")
-for (directory, subdirectories, files) in walkdir(root)
-    absolute_directory = abspath(directory)
-    if absolute_directory == output ||
-       startswith(absolute_directory, output_prefix)
-        empty!(subdirectories)
-        continue
-    end
-    for name in files
+for phase in ("method1", "method2", "reduction")
+    source_directory = joinpath(root, phase)
+    isdir(source_directory) || continue
+    for (directory, _, files) in walkdir(source_directory), name in files
         path = joinpath(directory, name)
         name == "rows.jls" && push!(row_files, path)
         endswith(name, "_best_solution.jld2") &&
