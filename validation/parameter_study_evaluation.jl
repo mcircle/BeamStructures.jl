@@ -134,6 +134,87 @@ function plot_tradeoff(summary, output_path)
     figure
 end
 
+const INITIALIZATION_LABELS = Dict(
+    "random" => "Zufälliger Zustand",
+    "zero_state" => "Nullzustand",
+)
+const INITIALIZATION_COLORS = Dict(
+    "random" => :steelblue,
+    "zero_state" => :darkorange,
+)
+
+function initialization_summary(runs)
+    require_columns(runs, [:initialization, :objective, :residual])
+    data = finite_rows(runs, [:objective, :residual])
+    output = NamedTuple[]
+    for group in groupby(data, :initialization)
+        push!(output, (
+            initialization=String(first(group.initialization)),
+            runs=nrow(group),
+            median_objective=median(Float64.(group.objective)),
+            mean_objective=mean(Float64.(group.objective)),
+            median_residual=median(Float64.(group.residual)),
+            mean_residual=mean(Float64.(group.residual)),
+        ))
+    end
+    DataFrame(output)
+end
+
+function plot_initializations(runs, output_path)
+    require_columns(runs, [:initialization, :objective, :residual])
+    data = finite_rows(runs, [:objective, :residual])
+    isempty(data) && return nothing
+
+    initializations = [name for name in ("random", "zero_state")
+                       if name in String.(data.initialization)]
+    append!(initializations,
+        sort(setdiff(unique(String.(data.initialization)), initializations)))
+    labels = [get(INITIALIZATION_LABELS, name, name)
+              for name in initializations]
+
+    figure = Figure(size=(900, 420))
+    metrics = [
+        (:objective, L"\\mathrm{Kennlinienfehler}\\;J_{\\mathrm{curve}}"),
+        (:residual, L"\\mathrm{Gleichgewichtsresiduum}\\;r_{\\mathrm{RMS}}"),
+    ]
+    for (column, (metric, ylabel)) in pairs(metrics)
+        axis = Axis(figure[1, column];
+            xlabel="Initialisierung des Systemzustands",
+            ylabel=ylabel,
+            title=metric == :objective ? "Kennlinienfehler" :
+                                         "Gleichgewichtsresiduum",
+            yscale=log10,
+            xticks=(eachindex(initializations), labels))
+        for (index, initialization) in pairs(initializations)
+            rows = data[String.(data.initialization) .== initialization, :]
+            values = Float64.(rows[!, metric])
+            offsets = 0.13 .* sin.(collect(eachindex(values)) .* 2.399963)
+            color = get(INITIALIZATION_COLORS, initialization, :gray)
+            scatter!(axis, index .+ offsets, values;
+                color=(color, 0.28), markersize=7)
+            value_median = median(values)
+            lines!(axis, [index - 0.22, index + 0.22],
+                [value_median, value_median];
+                color=:black, linewidth=3)
+            scatter!(axis, [index], [value_median];
+                color=color, marker=:diamond, markersize=15,
+                strokecolor=:black, strokewidth=1)
+        end
+    end
+    Legend(figure[2, 1:2],
+        [MarkerElement(marker=:circle, color=(:gray, 0.3)),
+         MarkerElement(marker=:diamond, color=:gray,
+                       strokecolor=:black, strokewidth=1)],
+        ["einzelner Optimierungslauf", "Median"];
+        orientation=:horizontal, tellwidth=false)
+
+    save(output_path * ".pdf", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".eps", figure)
+    save(output_path * ".png", figure; px_per_unit=2)
+    figure
+end
+
 function global_pareto_points(pareto)
     data = finite_rows(pareto, [:elements, :objective, :residual])
     isempty(data) && return data
@@ -293,6 +374,16 @@ function evaluate_parameter_study(input_directory::AbstractString,
         colorbar_label=L"\log_{10}(\mathrm{medianes\ Residuum})")
     plot_tradeoff(summary,
         joinpath(output_directory, "parameter_tradeoff"))
+
+    method2_path = joinpath(input_directory, "method2_runs.csv")
+    if isfile(method2_path)
+        method2_runs = CSV.read(method2_path, DataFrame)
+        initialization = initialization_summary(method2_runs)
+        CSV.write(joinpath(output_directory, "initialization_summary.csv"),
+                  initialization)
+        plot_initializations(method2_runs,
+            joinpath(output_directory, "initialization_comparison"))
+    end
 
     pareto_path = joinpath(input_directory, "parameter_study_pareto.csv")
     if isfile(pareto_path)
