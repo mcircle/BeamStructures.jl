@@ -215,6 +215,19 @@ Die Ergebnisse liegen getrennt nach Phase, Kennlinie und Parametersatz unter
 `PARAM_STUDY_OUTPUT`. Die jeweils nicht untersuchten Phasen verwenden
 `inverse_sqrt`, Lernratenfaktor 1 und die Basis-Iterationszahlen.
 
+Nach Abschluss werden sämtliche Shards ohne Änderung der Rohdaten aggregiert:
+
+```sh
+bash validation/lsf/aggregate_parameter_study.sh
+```
+
+Die kompakten Dateien liegen anschließend unter
+`validation/results/parameter_study/aggregated/`. Neben den drei Laufdateien
+werden eine gemeinsame Parameterzusammenfassung, eine Vollständigkeitsprüfung,
+die Pareto-Lösungen der Reduktionsphase und jeweils die beste JLD2-Lösung pro
+Phase erzeugt. Bei fehlenden Shards endet das Skript mit Exit-Code 2 und listet
+sie in `parameter_study_completeness.csv`.
+
 ## Eigene Optimierungsfälle
 
 ```sh
