@@ -91,7 +91,8 @@ function plot_heatmaps(summary, metric, output_path; colorbar_label)
         end
     end
     Colorbar(figure[:, 4], plotted; label=colorbar_label)
-    save(output_path * ".pdf", figure)
+    save(output_path * ".eps", figure)
+    save(output_path * ".svg", figure)
     save(output_path * ".png", figure; px_per_unit=2)
     figure
 end
@@ -100,6 +101,7 @@ function plot_tradeoff(summary, output_path)
     data = finite_rows(summary,
         [:median_residual, :median_objective, :total_seconds])
     figure = Figure(size=(1180, 420))
+
     for (column, phase) in pairs(PHASES)
         axis = Axis(figure[1, column],
             xlabel=L"\mathrm{Medianes\ Residuum}\;r_{\mathrm{RMS}}",
@@ -121,12 +123,13 @@ function plot_tradeoff(summary, output_path)
                         for value in rows.iterations],
                 markersize=runtime_scale, label=schedule)
         end
-        axislegend(axis; title="Schedule", position=:rt)
     end
-    Label(figure[2, 1:3],
-        "Marker: Iterationszahl (○ 500, □ 1000, △ 2000); Größe: Gesamtrechenzeit",
-        tellwidth=false)
-    save(output_path * ".pdf", figure)
+    Legend(figure[2,1],[MarkerElement(marker = :circle,color = SCHEDULE_COLORS[schedule]) for schedule in SCHEDULES],[string(s) for s in SCHEDULES], ["Schedule"],titleposition = :left,orientation = :horizontal, tellwidth=false)
+    Legend(figure[2,2],[MarkerElement(marker = s,color = :transparent,strokecolor= :black,strokewidth=1) for (m,s) in ITERATION_MARKERS],[string(m) for (m,s) in ITERATION_MARKERS], ["Iterationszahlen"],orientation = :horizontal, tellwidth=false,titleposition = :left)
+    Legend(figure[2,3],[MarkerElement(marker = :circle,color = :transparent,strokecolor= :black,strokewidth=1,markersize =10*mz) for mz in 1:3],["","",""], ["Gesamtrechenzeit"] ,orientation = :horizontal, tellwidth=false,titleposition = :left)
+    # Label(figure[2, 3],"Größe: Gesamtrechenzeit",tellwidth=false)
+    save(output_path * ".eps", figure)
+    save(output_path * ".svg", figure)
     save(output_path * ".png", figure; px_per_unit=2)
     figure
 end
