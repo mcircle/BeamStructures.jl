@@ -228,6 +228,28 @@ die Pareto-Lösungen der Reduktionsphase und jeweils die beste JLD2-Lösung pro
 Phase erzeugt. Bei fehlenden Shards endet das Skript mit Exit-Code 2 und listet
 sie in `parameter_study_completeness.csv`.
 
+Die aggregierten Daten werden mit CairoMakie und dem LaTeX-Schriftthema
+ausgewertet:
+
+```sh
+julia --project=validation validation/run_parameter_study_evaluation.jl
+```
+
+Unter `validation/results/parameter_study/evaluation/` entstehen:
+
+- Heatmaps für Kennlinienfehler und Gleichgewichtsresiduum als PDF und PNG,
+- das Trade-off-Diagramm aus Kennlinienfehler und Residuum,
+- das Pareto-Diagramm der Topologiereduktion,
+- `selected_parameters.csv` und `selected_parameters.tex` für den Haupttext,
+- `appendix_parameter_table.csv` mit allen Parameterkonfigurationen.
+
+Alle Diagramme besitzen beschriftete Achsen und verwenden logarithmische
+Darstellungen nur dort, wo dies explizit in Achse oder Farbskala angegeben ist.
+Der automatisch ausgewählte Parametersatz minimiert den gleich gewichteten,
+normierten Abstand aus medianem Kennlinienfehler, medianem Residuum und
+Gesamtrechenzeit. Diese Auswahl ist als Vorschlag zu prüfen, nicht als
+physikalisch zwingende Gewichtung.
+
 ## Eigene Optimierungsfälle
 
 ```sh
