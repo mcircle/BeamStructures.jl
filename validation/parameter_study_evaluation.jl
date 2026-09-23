@@ -119,8 +119,9 @@ function plot_stiffness_risk_heatmaps(summary, metric, output_path;
     phases = ["method2", "reduction"]
     iterations = sort(unique(Int.(summary.iterations)))
     rates = sort(unique(Float64.(summary.learning_rate_scale)))
-    raw_values = [transform(Float64(value)) for value in summary[!, metric]
-                  if isfinitevalue(value)]
+    raw_values = filter(isfinite,
+        [transform(Float64(value)) for value in summary[!, metric]
+         if isfinitevalue(value)])
     isempty(raw_values) && return nothing
     lo, hi = extrema(raw_values)
     colorrange = lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)
@@ -458,7 +459,7 @@ function evaluate_parameter_study(input_directory::AbstractString,
     plot_stiffness_risk_heatmaps(summary, :stiffness_error_rate_gt1,
         joinpath(output_directory, "parameter_heatmap_stiffness_outlier_rate");
         colorbar_label=L"\mathrm{Anteil}\;e_k>1",
-        annotation=value -> @sprintf("%.0f%%", 100value))
+        annotation=value -> @sprintf("%.0f%%", 100 * value))
 
     method2_path = joinpath(input_directory, "method2_runs.csv")
     if isfile(method2_path)
