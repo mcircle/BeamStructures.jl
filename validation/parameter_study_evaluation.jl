@@ -162,8 +162,7 @@ function plot_stiffness_risk_heatmaps(summary, metric, output_path;
 end
 
 function plot_tradeoff(summary, output_path)
-    data = finite_rows(summary,
-        [:median_residual, :median_objective, :total_seconds])
+    data = finite_rows(summary, [:median_residual, :median_objective])
     figure = Figure(size=(1180, 420))
 
     for (column, phase) in pairs(PHASES)
@@ -175,23 +174,16 @@ function plot_tradeoff(summary, output_path)
         for schedule in SCHEDULES
             rows = phase_data[phase_data.schedule .== schedule, :]
             isempty(rows) && continue
-            runtime = Float64.(rows.total_seconds)
-            runtime_scale = maximum(runtime) == minimum(runtime) ?
-                fill(14.0, length(runtime)) :
-                9 .+ 13 .* (runtime .- minimum(runtime)) ./
-                           (maximum(runtime) - minimum(runtime))
             scatter!(axis, Float64.(rows.median_residual),
                 Float64.(rows.median_objective);
                 color=SCHEDULE_COLORS[schedule],
                 marker=[get(ITERATION_MARKERS, Int(value), :circle)
                         for value in rows.iterations],
-                markersize=runtime_scale, label=schedule)
+                markersize=14, label=schedule)
         end
     end
     Legend(figure[2,1],[MarkerElement(marker = :circle,color = SCHEDULE_COLORS[schedule]) for schedule in SCHEDULES],[string(s) for s in SCHEDULES], ["Schedule"],titleposition = :left,orientation = :horizontal, tellwidth=false)
     Legend(figure[2,2],[MarkerElement(marker = s,color = :transparent,strokecolor= :black,strokewidth=1) for (m,s) in ITERATION_MARKERS],[string(m) for (m,s) in ITERATION_MARKERS], ["Iterationszahlen"],orientation = :horizontal, tellwidth=false,titleposition = :left)
-    Legend(figure[2,3],[MarkerElement(marker = :circle,color = :transparent,strokecolor= :black,strokewidth=1,markersize =10*mz) for mz in 1:3],["","",""], ["Gesamtrechenzeit"] ,orientation = :horizontal, tellwidth=false,titleposition = :left)
-    # Label(figure[2, 3],"Größe: Gesamtrechenzeit",tellwidth=false)
     save(output_path * ".eps", figure)
     save(output_path * ".svg", figure)
     save(output_path * ".png", figure; px_per_unit=2)
@@ -233,43 +225,31 @@ function plot_initializations(runs, output_path)
                        if name in String.(data.initialization)]
     append!(initializations,
         sort(setdiff(unique(String.(data.initialization)), initializations)))
-    labels = [get(INITIALIZATION_LABELS, name, name)
-              for name in initializations]
-
-    figure = Figure(size=(900, 420))
-    metrics = [
-        (:objective, L"\mathrm{Kennlinienfehler}\;J_{\mathrm{curve}}"),
-        (:residual, L"\mathrm{Gleichgewichtsresiduum}\;r_{\mathrm{RMS}}"),
-    ]
-    for (column, (metric, ylabel)) in pairs(metrics)
-        axis = Axis(figure[1, column];
-            xlabel="Initialisierung des Systemzustands",
-            ylabel=ylabel,
-            title=metric == :objective ? "Kennlinienfehler" :
-                                         "Gleichgewichtsresiduum",
-            yscale=log10,
-            xticks=(eachindex(initializations), labels))
-        for (index, initialization) in pairs(initializations)
-            rows = data[String.(data.initialization) .== initialization, :]
-            values = Float64.(rows[!, metric])
-            offsets = 0.13 .* sin.(collect(eachindex(values)) .* 2.399963)
-            color = get(INITIALIZATION_COLORS, initialization, :gray)
-            scatter!(axis, index .+ offsets, values;
-                color=(color, 0.28), markersize=7)
-            value_median = median(values)
-            lines!(axis, [index - 0.22, index + 0.22],
-                [value_median, value_median];
-                color=:black, linewidth=3)
-            scatter!(axis, [index], [value_median];
-                color=color, marker=:diamond, markersize=15,
-                strokecolor=:black, strokewidth=1)
-        end
+    figure = Figure(size=(720, 520))
+    axis = Axis(figure[1, 1];
+        xlabel=L"\mathrm{Gleichgewichtsresiduum}\;r_{\mathrm{RMS}}",
+        ylabel=L"\mathrm{Kennlinienfehler}\;J_{\mathrm{curve}}",
+        title="Einfluss der Zustandsinitialisierung",
+        xscale=log10, yscale=log10)
+    elements = MarkerElement[]
+    labels = String[]
+    for initialization in initializations
+        rows = data[String.(data.initialization) .== initialization, :]
+        color = get(INITIALIZATION_COLORS, initialization, :gray)
+        scatter!(axis, Float64.(rows.residual), Float64.(rows.objective);
+            color=(color, 0.45), markersize=9)
+        scatter!(axis, [median(Float64.(rows.residual))],
+            [median(Float64.(rows.objective))];
+            color=color, marker=:diamond, markersize=17,
+            strokecolor=:black, strokewidth=1)
+        push!(elements, MarkerElement(marker=:circle, color=(color, 0.45)))
+        push!(labels, get(INITIALIZATION_LABELS, initialization,
+                          initialization))
     end
-    Legend(figure[2, 1:2],
-        [MarkerElement(marker=:circle, color=(:gray, 0.3)),
-         MarkerElement(marker=:diamond, color=:gray,
-                       strokecolor=:black, strokewidth=1)],
-        ["einzelner Optimierungslauf", "Median"];
+    push!(elements, MarkerElement(marker=:diamond, color=:gray,
+                                  strokecolor=:black, strokewidth=1))
+    push!(labels, "komponentenweiser Median")
+    Legend(figure[2, 1], elements, labels;
         orientation=:horizontal, tellwidth=false)
 
     save(output_path * ".pdf", figure)
@@ -363,14 +343,13 @@ function selected_parameters(summary)
     output = NamedTuple[]
     for phase in PHASES
         candidates = finite_rows(summary[summary.phase .== phase, :],
-            [:median_objective, :median_residual, :total_seconds])
+            [:median_objective, :median_residual])
         isempty(candidates) && continue
         no_failures = candidates[candidates.failed .== 0, :]
         isempty(no_failures) || (candidates = no_failures)
         score_components = [
             normalized(candidates.median_objective),
             normalized(candidates.median_residual),
-            normalized(candidates.total_seconds),
         ]
         stiffness_available =
             :p90_stiffness_error in propertynames(candidates) &&
@@ -395,7 +374,6 @@ function selected_parameters(summary)
             learning_rate_scale=Float64(row.learning_rate_scale),
             median_objective=Float64(row.median_objective),
             median_residual=Float64(row.median_residual),
-            total_seconds=Float64(row.total_seconds),
             failed=Int(row.failed),
             p90_stiffness_error=stiffness_available ?
                 numeric_value(row.p90_stiffness_error) : missing,
@@ -415,12 +393,12 @@ end
 
 function write_selected_latex(path, selected)
     open(path, "w") do io
-        println(io, raw"\begin{tabular}{llrrrrr}")
+        println(io, raw"\begin{tabular}{llrrrr}")
         println(io, raw"\toprule")
         println(io,
             raw"Phase & Schedule & $N_{\mathrm{iter}}$ & $c_\eta$ & " *
             raw"$\widetilde{J}_{\mathrm{curve}}$ & " *
-            raw"$\widetilde{r}_{\mathrm{RMS}}$ & Rechenzeit [s] \\")
+            raw"$\widetilde{r}_{\mathrm{RMS}}$ \\")
         println(io, raw"\midrule")
         for row in eachrow(selected)
             println(io,
@@ -428,8 +406,7 @@ function write_selected_latex(path, selected)
                 "$(latex_escape(row.schedule)) & $(row.iterations) & " *
                 "$(round(row.learning_rate_scale; digits=2)) & " *
                 "$(round(row.median_objective; sigdigits=4)) & " *
-                "$(round(row.median_residual; sigdigits=4)) & " *
-                "$(round(row.total_seconds; digits=1)) \\\\")
+                "$(round(row.median_residual; sigdigits=4)) \\\\")
         end
         println(io, raw"\bottomrule")
         println(io, raw"\end{tabular}")
@@ -443,7 +420,7 @@ function evaluate_parameter_study(input_directory::AbstractString,
     summary = CSV.read(summary_path, DataFrame)
     require_columns(summary, [
         :phase, :config, :schedule, :iterations, :learning_rate_scale,
-        :median_objective, :median_residual, :total_seconds, :failed,
+        :median_objective, :median_residual, :failed,
         :median_stiffness_error, :p90_stiffness_error,
         :maximum_stiffness_error, :stiffness_error_rate_gt1,
         :stiffness_error_rate_gt10,
@@ -495,8 +472,9 @@ function evaluate_parameter_study(input_directory::AbstractString,
     write_selected_latex(
         joinpath(output_directory, "selected_parameters.tex"), selected)
 
-    appendix = sort(summary,
-        [:phase, :iterations, :schedule, :learning_rate_scale])
+    appendix = select(sort(summary,
+        [:phase, :iterations, :schedule, :learning_rate_scale]),
+        Not(:total_seconds))
     CSV.write(joinpath(output_directory, "appendix_parameter_table.csv"),
               appendix)
     selected

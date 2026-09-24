@@ -239,6 +239,8 @@ Unter `validation/results/parameter_study/evaluation/` entstehen:
 
 - Heatmaps für Kennlinienfehler und Gleichgewichtsresiduum als PDF und PNG,
 - das Trade-off-Diagramm aus Kennlinienfehler und Residuum,
+- den Initialisierungsvergleich als gemeinsamen Trade-off aus Kennlinienfehler
+  und Gleichgewichtsresiduum,
 - das Pareto-Diagramm der Topologiereduktion mit lokalen und globalen Frontpunkten,
 - `global_pareto.csv` mit der globalen Dominanzprüfung über alle Läufe,
 - `selected_parameters.csv` und `selected_parameters.tex` für den Haupttext,
@@ -247,9 +249,12 @@ Unter `validation/results/parameter_study/evaluation/` entstehen:
 Alle Diagramme besitzen beschriftete Achsen und verwenden logarithmische
 Darstellungen nur dort, wo dies explizit in Achse oder Farbskala angegeben ist.
 Der automatisch ausgewählte Parametersatz minimiert den gleich gewichteten,
-normierten Abstand aus medianem Kennlinienfehler, medianem Residuum und
-Gesamtrechenzeit. Diese Auswahl ist als Vorschlag zu prüfen, nicht als
-physikalisch zwingende Gewichtung.
+normierten Abstand aus medianem Kennlinienfehler und medianem Residuum. Für
+Methode 2 und die Reduktion gehen zusätzlich das 90-%-Quantil des normierten
+Steifigkeitsfehlers und der Anteil der Läufe mit einem Steifigkeitsfehler über
+eins ein. Die Rechenzeit wird nicht bewertet; der kontrollierte Rechenaufwand
+wird in den Grafiken durch die Iterationszahl dargestellt. Diese Auswahl ist
+als Vorschlag zu prüfen, nicht als physikalisch zwingende Gewichtung.
 
 ## Eigene Optimierungsfälle
 
