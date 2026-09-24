@@ -50,7 +50,7 @@ for (key, shards) in groups
         append!(rows, shard.rows)
     end
     if key[1] == :method1
-        sort!(rows; by=row -> (row.topology, row.seed))
+        sort!(rows; by=row -> (row.topology, row.initialization, row.seed))
     else
         sort!(rows; by=row -> row.seed)
     end

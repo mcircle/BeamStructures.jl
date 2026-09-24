@@ -537,7 +537,8 @@ function topology_study_case(kind, settings)
     relaxed_rates = scaled_rates(relaxed_scale)
     reduction_rates = scaled_rates(reduction_scale)
 
-    initial = (topology, rng) -> initial_parameters(rng, points)
+    initial = (topology, rng; zero_states=false) ->
+        initial_parameters(rng, points; zero_states)
     optimize = function(topology, parameters)
         weights = Float32.(topology.mask)
         result = optimize_fixed(model, parameters, weights, points, target,

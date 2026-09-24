@@ -47,7 +47,10 @@ rows = if method == :method1
     seeds = haskey(ENV, "BEAM_METHOD1_SEEDS") ?
         parse.(Int, split(ENV["BEAM_METHOD1_SEEDS"], ',')) :
         get(settings, "topology_method1_seeds", settings["seeds"])
-    optimize_topologies(selected, case; seeds, points, directory)
+    zero_state_seeds = get(
+        settings, "topology_method1_zero_state_seeds", Int[])
+    optimize_topologies(selected, case; seeds, zero_state_seeds,
+                        points, directory)
 else
     seeds = haskey(ENV, "BEAM_METHOD2_SEEDS") ?
         parse.(Int, split(ENV["BEAM_METHOD2_SEEDS"], ',')) :

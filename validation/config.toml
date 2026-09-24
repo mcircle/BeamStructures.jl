@@ -1,5 +1,6 @@
 seeds = [11, 29, 47]
 topology_method1_seeds = [11, 29, 47, 71, 97]
+topology_method1_zero_state_seeds = [1]
 topology_method2_zero_state_seeds = [1]
 topology_method2_seeds = [
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10,

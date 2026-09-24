@@ -44,7 +44,8 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             name="fixture",
             scales=(1.0, 1.0, 1.0),
             target=points -> hcat(points, zero(points), zero(points)),
-            initial=(topology, rng) -> (value=[2.0],),
+            initial=(topology, rng; zero_states=false) ->
+                (value=zero_states ? [0.0] : [2.0],),
             optimize=(topology, parameters) ->
                 (parameters=(value=[1.0],), converged=true, residual=0.0),
             evaluate=(topology, parameters, points) ->
@@ -55,10 +56,16 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
         rows = TopologyEvaluation.optimize_topologies(selected, case;
             seeds=[1, 2], points=[-1.0, 0.0, 1.0], directory)
         @test length(rows) == 4
+        @test all(row -> row.initialization == "random", rows)
         @test all(row -> row.objective == 0, rows)
         @test all(row -> row.initial_objective > row.objective, rows)
         @test all(row -> row.improvement == row.initial_objective, rows)
         @test all(row -> ismissing(row.volume), rows)
+        zero_rows = TopologyEvaluation.optimize_topologies(selected, case;
+            seeds=Int[], zero_state_seeds=[7],
+            points=[-1.0, 0.0, 1.0], directory)
+        @test length(zero_rows) == 2
+        @test all(row -> row.initialization == "zero_state", zero_rows)
         summary = TopologyEvaluation.summarize_topologies(rows;
                                                            residual_limit=1e-6)
         @test length(summary) == 2

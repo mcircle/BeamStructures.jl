@@ -215,6 +215,13 @@ Die Ergebnisse liegen getrennt nach Phase, Kennlinie und Parametersatz unter
 `PARAM_STUDY_OUTPUT`. Die jeweils nicht untersuchten Phasen verwenden
 `inverse_sqrt`, Lernratenfaktor 1 und die Basis-Iterationszahlen.
 
+Für die anschließende Hauptstudie verwendet Methode 1 je zulässiger Topologie
+und Sollkennlinie fünf zufällige Zustandsinitialisierungen sowie einen
+zusätzlichen Nullzustand. Methode 2 verwendet je Sollkennlinie 200 zufällige
+Initialisierungen der vollständigen relaxierten Kandidatenstruktur sowie einen
+zusätzlichen Nullzustand. Die jeweilige Initialisierungsart wird in den
+Laufdateien in der Spalte `initialization` gespeichert.
+
 Nach Abschluss werden sämtliche Shards ohne Änderung der Rohdaten aggregiert:
 
 ```sh

@@ -31,7 +31,8 @@ function save_best_candidate(directory, candidate)
         adjacency=candidate.adjacency,
         continuous_adjacency=candidate.continuous_adjacency,
         method=String(candidate.method), case_name=candidate.case_name,
-        seed=candidate.seed, topology=candidate.topology,
+        seed=candidate.seed, initialization=candidate.initialization,
+        topology=candidate.topology,
         objective=candidate.objective,
         optimization_objective=candidate.optimization_objective,
         residual=candidate.residual, converged=candidate.converged,
@@ -86,8 +87,9 @@ function curve_metrics(actual, target, scales)
     (; objective, component)
 end
 
-function failure_row(topology, seed, seconds, err)
-    (topology=topology.id, seed, status="failed", residual=missing,
+function failure_row(topology, seed, initialization, seconds, err)
+    (topology=topology.id, seed, initialization, status="failed",
+     residual=missing,
      initial_objective=missing, objective=missing,
      optimization_objective=missing, improvement=missing,
      Fx_mae=missing, Fy_mae=missing, Mz_mae=missing,
@@ -105,16 +107,25 @@ evaluate(topology, parameters, points), target(points), and scales. A volume
 callback is optional. The optimizer returns
 (parameters, converged, residual).
 """
-function optimize_topologies(topologies, case; seeds, points, directory)
+function optimize_topologies(topologies, case; seeds, points, directory,
+                             zero_state_seeds=Int[])
     target = case.target(points)
     size(target) == (length(points), 3) ||
         throw(DimensionMismatch("target must have Fx, Fy, Mz columns"))
     rows = NamedTuple[]
     best_candidate = nothing
-    for topology in topologies, seed in seeds
+    runs = vcat([(seed=Int(seed), initialization="random") for seed in seeds],
+                [(seed=Int(seed), initialization="zero_state")
+                 for seed in zero_state_seeds])
+    for topology in topologies, run in runs
+        seed = run.seed
+        initialization = run.initialization
         elapsed = 0.0
         try
-            initial = case.initial(topology, MersenneTwister(seed))
+            initial = initialization == "zero_state" ?
+                case.initial(topology, MersenneTwister(seed);
+                             zero_states=true) :
+                case.initial(topology, MersenneTwister(seed))
             before = case.evaluate(topology, initial, points)
             initial_metric = curve_metrics(before, target, case.scales)
             result = nothing
@@ -139,7 +150,7 @@ function optimize_topologies(topologies, case; seeds, points, directory)
                         curve_metrics(ansys, target, case.scales).objective
                 end
             end
-            push!(rows, (topology=topology.id, seed,
+            push!(rows, (topology=topology.id, seed, initialization,
                 status=result.converged ? "converged" : "not_converged",
                 residual=result.residual,
                 initial_objective=initial_metric.objective,
@@ -153,6 +164,7 @@ function optimize_topologies(topologies, case; seeds, points, directory)
                 elements=topology.elements, seconds=elapsed, message=""))
             if has_solution(result.parameters)
                 candidate = (method=:method1, case_name=case.name, seed,
+                    initialization,
                     topology=topology.id, parameters=result.parameters,
                     adjacency=topology.adjacency,
                     continuous_adjacency=topology.adjacency,
@@ -167,7 +179,8 @@ function optimize_topologies(topologies, case; seeds, points, directory)
                 end
             end
         catch err
-            push!(rows, failure_row(topology, seed, elapsed, err))
+            push!(rows, failure_row(
+                topology, seed, initialization, elapsed, err))
         end
     end
     write_rows(joinpath(directory, "$(case.name)_method1_runs.csv"), rows)
@@ -295,6 +308,7 @@ function run_method2_initializations(case; seeds, edge_count, directory,
                 elements=count(result.mask), seconds=elapsed, message=""))
             if admissible && rich_result && has_solution(result.parameters)
                 candidate = (method=:method2, case_name=case.name, seed,
+                    initialization,
                     topology=topology_id(result.mask),
                     parameters=result.parameters,
                     adjacency=result.adjacency,

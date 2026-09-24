@@ -60,18 +60,24 @@ if mode != :full
 end
 
 method1_seeds = get(settings, "topology_method1_seeds", settings["seeds"])
+method1_zero_state_seeds = get(
+    settings, "topology_method1_zero_state_seeds", Int[])
 method2_seeds = get(settings, "topology_method2_seeds", collect(1:200))
+method2_zero_state_seeds = get(
+    settings, "topology_method2_zero_state_seeds", Int[])
 residual_limit = get(settings, "topology_residual_limit", Inf)
 
 for case in cases
     target = case.target(points)
     runs = optimize_topologies(topologies, case; seeds=method1_seeds,
-                               points, directory=output)
+        zero_state_seeds=method1_zero_state_seeds,
+        points, directory=output)
     summary = summarize_topologies(runs; residual_limit)
     write_rows(joinpath(output, "$(case.name)_topology_summary.csv"), summary)
 
     if hasproperty(case, :method2)
         method2 = run_method2_initializations(case; seeds=method2_seeds,
+            zero_state_seeds=method2_zero_state_seeds,
             edge_count=length(candidate_edges(n)), directory=output)
         compare_method2(summary, method2; directory=output, name=case.name)
     end
