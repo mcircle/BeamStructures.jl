@@ -1,0 +1,483 @@
+module ParameterStudyEvaluation
+
+using CairoMakie
+using CSV
+using DataFrames
+using LaTeXStrings
+using Printf
+using Statistics
+
+export evaluate_parameter_study
+
+const PHASES = ["method1", "method2", "reduction"]
+const SCHEDULES = ["fixed", "inverse_sqrt", "cos"]
+const PHASE_LABELS = Dict(
+    "method1" => "Methode 1",
+    "method2" => "Relaxierte Methode 2",
+    "reduction" => "Reduktion",
+)
+const SCHEDULE_COLORS = Dict(
+    "fixed" => :steelblue,
+    "inverse_sqrt" => :darkorange,
+    "cos" => :seagreen,
+)
+const ITERATION_MARKERS = Dict(
+    500 => :circle,
+    1000 => :rect,
+    2000 => :utriangle,
+)
+
+function numeric_value(value)
+    ismissing(value) && return NaN
+    value isa Number && return Float64(value)
+    value isa AbstractString || return NaN
+    parsed = tryparse(Float64, value)
+    isnothing(parsed) ? NaN : parsed
+end
+
+isfinitevalue(value) = isfinite(numeric_value(value))
+
+function require_columns(table, names)
+    missing_names = setdiff(Symbol.(names), propertynames(table))
+    isempty(missing_names) ||
+        throw(ArgumentError("missing columns: $(join(missing_names, ", "))"))
+end
+
+function finite_rows(table, columns)
+    mask = trues(nrow(table))
+    for column in columns
+        mask .&= map(isfinitevalue, table[!, column])
+    end
+    table[mask, :]
+end
+
+function log_metric(value)
+    numeric = numeric_value(value)
+    isfinite(numeric) && numeric > 0 ? log10(numeric) : NaN
+end
+
+function metric_range(table, metric)
+    values = filter(isfinite, log_metric.(table[!, metric]))
+    isempty(values) && error("no finite positive values for $metric")
+    lo, hi = extrema(values)
+    lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)
+end
+
+function heatmap_values(table, phase, schedule, metric, iterations, rates)
+    values = fill(NaN, length(iterations), length(rates))
+    selected = table[(table.phase .== phase) .&
+                     (table.schedule .== schedule), :]
+    for (i, iteration) in pairs(iterations), (j, rate) in pairs(rates)
+        row = selected[(selected.iterations .== iteration) .&
+                       isapprox.(selected.learning_rate_scale, rate), :]
+        nrow(row) == 1 || continue
+        values[i, j] = log_metric(row[1, metric])
+    end
+    values
+end
+
+function plot_heatmaps(summary, metric, output_path; colorbar_label)
+    iterations = sort(unique(Int.(summary.iterations)))
+    rates = sort(unique(Float64.(summary.learning_rate_scale)))
+    colorrange = metric_range(summary, metric)
+    figure = Figure(size=(1180, 850))
+    plotted = nothing
+    for (row, phase) in pairs(PHASES), (column, schedule) in pairs(SCHEDULES)
+        axis = Axis(figure[row, column],
+            xlabel=L"\mathrm{Iterationszahl}\;N_{\mathrm{iter}}",
+            ylabel=L"\mathrm{Lernratenfaktor}\;c_{\eta}",
+            title="$(PHASE_LABELS[phase]) — $(schedule)",
+            xticks=iterations, yticks=rates)
+        values = heatmap_values(
+            summary, phase, schedule, metric, iterations, rates)
+        plotted = heatmap!(axis, iterations, rates, values;
+            colormap=:viridis, colorrange)
+        for i in eachindex(iterations), j in eachindex(rates)
+            isfinite(values[i, j]) || continue
+            text!(axis, iterations[i], rates[j];
+                text=@sprintf("%.2f", values[i, j]),
+                align=(:center, :center), color=:white, fontsize=11)
+        end
+    end
+    Colorbar(figure[:, 4], plotted; label=colorbar_label)
+    save(output_path * ".eps", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".png", figure; px_per_unit=2)
+    figure
+end
+
+function risk_heatmap_values(table, phase, schedule, metric,
+                             iterations, rates, transform)
+    values = fill(NaN, length(iterations), length(rates))
+    selected = table[(table.phase .== phase) .&
+                     (table.schedule .== schedule), :]
+    for (i, iteration) in pairs(iterations), (j, rate) in pairs(rates)
+        row = selected[(selected.iterations .== iteration) .&
+                       isapprox.(selected.learning_rate_scale, rate), :]
+        nrow(row) == 1 || continue
+        value = row[1, metric]
+        isfinitevalue(value) || continue
+        values[i, j] = transform(numeric_value(value))
+    end
+    values
+end
+
+function plot_stiffness_risk_heatmaps(summary, metric, output_path;
+                                      colorbar_label, transform=identity,
+                                      annotation=value -> @sprintf("%.2f", value))
+    phases = ["method2", "reduction"]
+    iterations = sort(unique(Int.(summary.iterations)))
+    rates = sort(unique(Float64.(summary.learning_rate_scale)))
+    raw_values = filter(isfinite,
+        [transform(numeric_value(value)) for value in summary[!, metric]
+         if isfinitevalue(value)])
+    isempty(raw_values) && return nothing
+    lo, hi = extrema(raw_values)
+    colorrange = lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)
+    figure = Figure(size=(1180, 590))
+    plotted = nothing
+    for (row, phase) in pairs(phases), (column, schedule) in pairs(SCHEDULES)
+        axis = Axis(figure[row, column],
+            xlabel=L"\mathrm{Iterationszahl}\;N_{\mathrm{iter}}",
+            ylabel=L"\mathrm{Lernratenfaktor}\;c_{\eta}",
+            title="$(PHASE_LABELS[phase]) — $(schedule)",
+            xticks=iterations, yticks=rates)
+        values = risk_heatmap_values(summary, phase, schedule, metric,
+                                     iterations, rates, transform)
+        plotted = heatmap!(axis, iterations, rates, values;
+            colormap=:magma, colorrange)
+        for i in eachindex(iterations), j in eachindex(rates)
+            isfinite(values[i, j]) || continue
+            text!(axis, iterations[i], rates[j];
+                text=annotation(values[i, j]),
+                align=(:center, :center), color=:white, fontsize=11)
+        end
+    end
+    Colorbar(figure[:, 4], plotted; label=colorbar_label)
+    save(output_path * ".pdf", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".eps", figure)
+    save(output_path * ".png", figure; px_per_unit=2)
+    figure
+end
+
+function plot_tradeoff(summary, output_path)
+    data = finite_rows(summary, [:median_residual, :median_objective])
+    figure = Figure(size=(1180, 420))
+
+    for (column, phase) in pairs(PHASES)
+        axis = Axis(figure[1, column],
+            xlabel=L"\mathrm{Medianes\ Residuum}\;r_{\mathrm{RMS}}",
+            ylabel=L"\mathrm{Medianer\ Kennlinienfehler}\;J_{\mathrm{curve}}",
+            title=PHASE_LABELS[phase], xscale=log10, yscale=log10)
+        phase_data = data[data.phase .== phase, :]
+        for schedule in SCHEDULES
+            rows = phase_data[phase_data.schedule .== schedule, :]
+            isempty(rows) && continue
+            scatter!(axis, Float64.(rows.median_residual),
+                Float64.(rows.median_objective);
+                color=SCHEDULE_COLORS[schedule],
+                marker=[get(ITERATION_MARKERS, Int(value), :circle)
+                        for value in rows.iterations],
+                markersize=14, label=schedule)
+        end
+    end
+    Legend(figure[2,1],[MarkerElement(marker = :circle,color = SCHEDULE_COLORS[schedule]) for schedule in SCHEDULES],[string(s) for s in SCHEDULES], ["Schedule"],titleposition = :left,orientation = :horizontal, tellwidth=false)
+    Legend(figure[2,2],[MarkerElement(marker = s,color = :transparent,strokecolor= :black,strokewidth=1) for (m,s) in ITERATION_MARKERS],[string(m) for (m,s) in ITERATION_MARKERS], ["Iterationszahlen"],orientation = :horizontal, tellwidth=false,titleposition = :left)
+    save(output_path * ".eps", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".png", figure; px_per_unit=2)
+    figure
+end
+
+const INITIALIZATION_LABELS = Dict(
+    "random" => "Zufälliger Zustand",
+    "zero_state" => "Nullzustand",
+)
+const INITIALIZATION_COLORS = Dict(
+    "random" => :steelblue,
+    "zero_state" => :darkorange,
+)
+
+function initialization_summary(runs)
+    require_columns(runs, [:initialization, :objective, :residual])
+    data = finite_rows(runs, [:objective, :residual])
+    output = NamedTuple[]
+    for group in groupby(data, :initialization)
+        push!(output, (
+            initialization=String(first(group.initialization)),
+            runs=nrow(group),
+            median_objective=median(Float64.(group.objective)),
+            mean_objective=mean(Float64.(group.objective)),
+            median_residual=median(Float64.(group.residual)),
+            mean_residual=mean(Float64.(group.residual)),
+        ))
+    end
+    DataFrame(output)
+end
+
+function plot_initializations(runs, output_path)
+    require_columns(runs, [:initialization, :objective, :residual])
+    data = finite_rows(runs, [:objective, :residual])
+    isempty(data) && return nothing
+
+    initializations = [name for name in ("random", "zero_state")
+                       if name in String.(data.initialization)]
+    append!(initializations,
+        sort(setdiff(unique(String.(data.initialization)), initializations)))
+    figure = Figure(size=(720, 520))
+    axis = Axis(figure[1, 1];
+        xlabel=L"\mathrm{Gleichgewichtsresiduum}\;r_{\mathrm{RMS}}",
+        ylabel=L"\mathrm{Kennlinienfehler}\;J_{\mathrm{curve}}",
+        title="Einfluss der Zustandsinitialisierung",
+        xscale=log10, yscale=log10)
+    elements = MarkerElement[]
+    labels = String[]
+    for initialization in initializations
+        rows = data[String.(data.initialization) .== initialization, :]
+        color = get(INITIALIZATION_COLORS, initialization, :gray)
+        scatter!(axis, Float64.(rows.residual), Float64.(rows.objective);
+            color=(color, 0.45), markersize=9)
+        scatter!(axis, [median(Float64.(rows.residual))],
+            [median(Float64.(rows.objective))];
+            color=color, marker=:diamond, markersize=17,
+            strokecolor=:black, strokewidth=1)
+        push!(elements, MarkerElement(marker=:circle, color=(color, 0.45)))
+        push!(labels, get(INITIALIZATION_LABELS, initialization,
+                          initialization))
+    end
+    push!(elements, MarkerElement(marker=:diamond, color=:gray,
+                                  strokecolor=:black, strokewidth=1))
+    push!(labels, "komponentenweiser Median")
+    Legend(figure[2, 1], elements, labels;
+        orientation=:horizontal, tellwidth=false)
+
+    save(output_path * ".pdf", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".eps", figure)
+    save(output_path * ".png", figure; px_per_unit=2)
+    figure
+end
+
+function global_pareto_points(pareto)
+    data = finite_rows(pareto, [:elements, :objective, :residual])
+    isempty(data) && return data
+    dominates(a, b) =
+        a.elements <= b.elements &&
+        a.objective <= b.objective &&
+        a.residual <= b.residual &&
+        (a.elements < b.elements ||
+         a.objective < b.objective ||
+         a.residual < b.residual)
+    global_front = map(1:nrow(data)) do i
+        !any(j -> j != i && dominates(data[j, :], data[i, :]),
+             1:nrow(data))
+    end
+    data.global_pareto = global_front
+    data
+end
+
+pareto_markers(data) = [
+    coalesce(selected, false) ? :star5 : :circle
+    for selected in data.selected
+]
+
+function plot_pareto(data, output_path)
+    isempty(data) && return nothing
+    figure = Figure(size=(760, 500))
+    axis = Axis(figure[1, 1],
+        xlabel=L"\mathrm{Anzahl\ der\ Balkenelemente}\;n_b",
+        ylabel=L"\mathrm{Kennlinienfehler}\;J_{\mathrm{curve}}",
+        title="Lokale und globale Pareto-Lösungen der Topologiereduktion")
+
+    residuals = Float64.(data.residual)
+    colorrange = extrema(residuals)
+    colorrange = colorrange[1] == colorrange[2] ?
+        (colorrange[1] - eps(), colorrange[2] + eps()) : colorrange
+    local_data = data[.!data.global_pareto, :]
+    global_data = data[data.global_pareto, :]
+
+    if !isempty(local_data)
+        scatter!(axis, Float64.(local_data.elements),
+            Float64.(local_data.objective);
+            color=Float64.(local_data.residual), colorrange,
+            colormap=:plasma, marker=pareto_markers(local_data),
+            markersize=[coalesce(value, false) ? 18 : 10
+                        for value in local_data.selected],
+            alpha=0.3)
+    end
+    plotted = scatter!(axis, Float64.(global_data.elements),
+        Float64.(global_data.objective);
+        color=Float64.(global_data.residual), colorrange,
+        colormap=:plasma, marker=pareto_markers(global_data),
+        markersize=[coalesce(value, false) ? 22 : 14
+                    for value in global_data.selected],
+        strokecolor=:black, strokewidth=1.5)
+
+    Colorbar(figure[1, 2], plotted;
+        label=L"\mathrm{Gleichgewichtsresiduum}\;r_{\mathrm{RMS}}")
+    Legend(figure[2, 1:2],
+        [MarkerElement(marker=:circle, color=(:gray, 0.3)),
+         MarkerElement(marker=:circle, color=:gray,
+                       strokecolor=:black, strokewidth=1.5),
+         MarkerElement(marker=:star5, color=:gray,
+                       strokecolor=:black, strokewidth=1.5)],
+        ["lokal Pareto-optimal", "global Pareto-optimal",
+         "ausgewählter Vorschlag"];
+        orientation=:horizontal, tellwidth=false)
+
+    save(output_path * ".pdf", figure)
+    save(output_path * ".svg", figure)
+    save(output_path * ".eps", figure)
+    save(output_path * ".png", figure; px_per_unit=2)
+    figure
+end
+
+function normalized(values)
+    values = numeric_value.(values)
+    lo, hi = extrema(values)
+    hi == lo ? zeros(length(values)) : (values .- lo) ./ (hi - lo)
+end
+
+function selected_parameters(summary)
+    output = NamedTuple[]
+    for phase in PHASES
+        candidates = finite_rows(summary[summary.phase .== phase, :],
+            [:median_objective, :median_residual])
+        isempty(candidates) && continue
+        no_failures = candidates[candidates.failed .== 0, :]
+        isempty(no_failures) || (candidates = no_failures)
+        score_components = [
+            normalized(candidates.median_objective),
+            normalized(candidates.median_residual),
+        ]
+        stiffness_available =
+            :p90_stiffness_error in propertynames(candidates) &&
+            :stiffness_error_rate_gt1 in propertynames(candidates) &&
+            all(isfinitevalue, candidates.p90_stiffness_error) &&
+            all(isfinitevalue, candidates.stiffness_error_rate_gt1)
+        if stiffness_available
+            push!(score_components,
+                normalized(log1p.(numeric_value.(candidates.p90_stiffness_error))))
+            push!(score_components,
+                normalized(candidates.stiffness_error_rate_gt1))
+        end
+        score = sqrt.(reduce(+, component .^ 2
+                             for component in score_components))
+        index = argmin(score)
+        row = candidates[index, :]
+        push!(output, (;
+            phase,
+            config=Int(row.config),
+            schedule=String(row.schedule),
+            iterations=Int(row.iterations),
+            learning_rate_scale=Float64(row.learning_rate_scale),
+            median_objective=Float64(row.median_objective),
+            median_residual=Float64(row.median_residual),
+            failed=Int(row.failed),
+            p90_stiffness_error=stiffness_available ?
+                numeric_value(row.p90_stiffness_error) : missing,
+            stiffness_error_rate_gt1=stiffness_available ?
+                numeric_value(row.stiffness_error_rate_gt1) : missing,
+            stiffness_error_rate_gt10=stiffness_available ?
+                numeric_value(row.stiffness_error_rate_gt10) : missing,
+            selection_score=score[index],
+        ))
+    end
+    DataFrame(output)
+end
+
+function latex_escape(value)
+    replace(string(value), "_" => raw"\_")
+end
+
+function write_selected_latex(path, selected)
+    open(path, "w") do io
+        println(io, raw"\begin{tabular}{llrrrr}")
+        println(io, raw"\toprule")
+        println(io,
+            raw"Phase & Schedule & $N_{\mathrm{iter}}$ & $c_\eta$ & " *
+            raw"$\widetilde{J}_{\mathrm{curve}}$ & " *
+            raw"$\widetilde{r}_{\mathrm{RMS}}$ \\")
+        println(io, raw"\midrule")
+        for row in eachrow(selected)
+            println(io,
+                "$(latex_escape(PHASE_LABELS[row.phase])) & " *
+                "$(latex_escape(row.schedule)) & $(row.iterations) & " *
+                "$(round(row.learning_rate_scale; digits=2)) & " *
+                "$(round(row.median_objective; sigdigits=4)) & " *
+                "$(round(row.median_residual; sigdigits=4)) \\\\")
+        end
+        println(io, raw"\bottomrule")
+        println(io, raw"\end{tabular}")
+    end
+end
+
+function evaluate_parameter_study(input_directory::AbstractString,
+                                  output_directory::AbstractString)
+    summary_path = joinpath(input_directory, "parameter_study_summary.csv")
+    isfile(summary_path) || error("missing aggregated summary: $summary_path")
+    summary = CSV.read(summary_path, DataFrame)
+    require_columns(summary, [
+        :phase, :config, :schedule, :iterations, :learning_rate_scale,
+        :median_objective, :median_residual, :failed,
+        :median_stiffness_error, :p90_stiffness_error,
+        :maximum_stiffness_error, :stiffness_error_rate_gt1,
+        :stiffness_error_rate_gt10,
+    ])
+
+    mkpath(output_directory)
+    CairoMakie.activate!()
+    set_theme!(theme_latexfonts())
+
+    plot_heatmaps(summary, :median_objective,
+        joinpath(output_directory, "parameter_heatmap_objective");
+        colorbar_label=L"\log_{10}(\mathrm{medianer\ Kennlinienfehler})")
+    plot_heatmaps(summary, :median_residual,
+        joinpath(output_directory, "parameter_heatmap_residual");
+        colorbar_label=L"\log_{10}(\mathrm{medianes\ Residuum})")
+    plot_tradeoff(summary,
+        joinpath(output_directory, "parameter_tradeoff"))
+    plot_stiffness_risk_heatmaps(summary, :p90_stiffness_error,
+        joinpath(output_directory, "parameter_heatmap_stiffness_p90");
+        colorbar_label=L"\log_{10}(Q_{0.9}(e_k))",
+        transform=log_metric)
+    plot_stiffness_risk_heatmaps(summary, :stiffness_error_rate_gt1,
+        joinpath(output_directory, "parameter_heatmap_stiffness_outlier_rate");
+        colorbar_label=L"\mathrm{Anteil}\;e_k>1",
+        annotation=value -> @sprintf("%.0f%%", 100 * value))
+
+    method2_path = joinpath(input_directory, "method2_runs.csv")
+    if isfile(method2_path)
+        method2_runs = CSV.read(method2_path, DataFrame)
+        initialization = initialization_summary(method2_runs)
+        CSV.write(joinpath(output_directory, "initialization_summary.csv"),
+                  initialization)
+        plot_initializations(method2_runs,
+            joinpath(output_directory, "initialization_comparison"))
+    end
+
+    pareto_path = joinpath(input_directory, "parameter_study_pareto.csv")
+    if isfile(pareto_path)
+        pareto = CSV.read(pareto_path, DataFrame)
+        global_pareto = global_pareto_points(pareto)
+        CSV.write(joinpath(output_directory, "global_pareto.csv"),
+                  global_pareto)
+        plot_pareto(global_pareto,
+                    joinpath(output_directory, "reduction_pareto"))
+    end
+
+    selected = selected_parameters(summary)
+    CSV.write(joinpath(output_directory, "selected_parameters.csv"), selected)
+    write_selected_latex(
+        joinpath(output_directory, "selected_parameters.tex"), selected)
+
+    appendix = select(sort(summary,
+        [:phase, :iterations, :schedule, :learning_rate_scale]),
+        Not(:total_seconds))
+    CSV.write(joinpath(output_directory, "appendix_parameter_table.csv"),
+              appendix)
+    selected
+end
+
+end

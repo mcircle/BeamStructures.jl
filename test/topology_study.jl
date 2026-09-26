@@ -44,20 +44,28 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             name="fixture",
             scales=(1.0, 1.0, 1.0),
             target=points -> hcat(points, zero(points), zero(points)),
-            initial=(topology, rng) -> (value=[2.0],),
+            initial=(topology, rng; zero_states=false) ->
+                (value=zero_states ? [0.0] : [2.0],),
             optimize=(topology, parameters) ->
                 (parameters=(value=[1.0],), converged=true, residual=0.0),
             evaluate=(topology, parameters, points) ->
                 hcat(parameters.value[1].*points, zero(points), zero(points)),
-            method2=rng -> (mask=fixed_mask, converged=true, residual=0.0))
+            method2=(rng; zero_states=false) ->
+                (mask=fixed_mask, converged=true, residual=0.0))
 
         rows = TopologyEvaluation.optimize_topologies(selected, case;
             seeds=[1, 2], points=[-1.0, 0.0, 1.0], directory)
         @test length(rows) == 4
+        @test all(row -> row.initialization == "random", rows)
         @test all(row -> row.objective == 0, rows)
         @test all(row -> row.initial_objective > row.objective, rows)
         @test all(row -> row.improvement == row.initial_objective, rows)
         @test all(row -> ismissing(row.volume), rows)
+        zero_rows = TopologyEvaluation.optimize_topologies(selected, case;
+            seeds=Int[], zero_state_seeds=[7],
+            points=[-1.0, 0.0, 1.0], directory)
+        @test length(zero_rows) == 2
+        @test all(row -> row.initialization == "zero_state", zero_rows)
         summary = TopologyEvaluation.summarize_topologies(rows;
                                                            residual_limit=1e-6)
         @test length(summary) == 2
@@ -67,6 +75,11 @@ include(joinpath(@__DIR__, "..", "validation", "topology_evaluation.jl"))
             seeds=1:3, edge_count=10, directory)
         @test length(method2) == 3
         @test length(unique(row.topology for row in method2)) == 1
+        @test all(row -> row.initialization == "random", method2)
+        zero_method2 = TopologyEvaluation.run_method2_initializations(case;
+            seeds=Int[], zero_state_seeds=[7], edge_count=10, directory)
+        @test length(zero_method2) == 1
+        @test only(zero_method2).initialization == "zero_state"
         comparison = TopologyEvaluation.compare_method2(summary, method2;
             directory, name=case.name)
         @test all(row -> row.gap == 0, comparison)
@@ -107,8 +120,16 @@ end
     adjacency = weighted_adjacency(weights)
     @test issymmetric(adjacency)
     @test all(iszero, diag(adjacency))
-    @test adjacency[2, 1] == weights[1]
+    @test adjacency[2, 1] == 0
+    @test adjacency[3, 1] == weights[2]
     @test adjacency[5, 4] == weights[end]
+    active_adjacency = weighted_adjacency(weights[2:end])
+    @test active_adjacency == adjacency
+    @test scheduled_eta(:fixed, 1, 100, 0.01) == 0.01
+    @test isfinite(scheduled_eta(:cos, 1, 100, 0.01))
+    @test isfinite(scheduled_eta(:inverse_sqrt, 1, 100, 0.01))
+    @test scheduled_eta(:inverse_sqrt, 200, 1000, 0.005;
+        parameters=200, warmups=200) ≈ 0.005
 
     parameters = initial_parameters(MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0])
     @test keys(parameters.nodes) == NODE_NAMES
@@ -119,6 +140,9 @@ end
     @test parameters.nodes.Node_4 isa BS.Branch
     @test parameters.nodes.Node_5 isa BS.Clamp
     @test size(parameters.states) == (3, 12, 3)
+    zero_parameters = initial_parameters(
+        MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0]; zero_states=true)
+    @test all(iszero, zero_parameters.states)
 
     beam = parameters.beams.Beam_1
     beam_vector = Float32[beam...]

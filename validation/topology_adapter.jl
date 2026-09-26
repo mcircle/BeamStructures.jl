@@ -6,7 +6,11 @@ const NODE_COUNT = 5
 const CLAMP_NODES = (1, 2, 5)
 const BRANCH_NODES = (3, 4)
 const MOVED_NODE = 5
+const FIXED_STIFFNESS_DOFS = [1, 2, 3, 4, 5, 6, 13, 15]
+const LOADED_STIFFNESS_DOFS = [14]
 const EDGE_LIST = Tuple(candidate_edges(NODE_COUNT))
+const IGNORED_EDGE_IDS = (1,)
+const OPTIMIZED_EDGE_IDS = Tuple(setdiff(eachindex(EDGE_LIST), IGNORED_EDGE_IDS))
 const EDGE_INDEX = [i == j ? 0 :
     findfirst(==((max(i, j), min(i, j))), EDGE_LIST)
     for i in 1:NODE_COUNT, j in 1:NODE_COUNT]
@@ -35,8 +39,95 @@ function target_characteristic(kind::Symbol, displacements; force_scale=10.0)
     hcat(fx, zero(fx), zero(fx))
 end
 
+function full_edge_weights(weights)
+    if length(weights) == length(EDGE_LIST)
+        allowed = map(i -> i in IGNORED_EDGE_IDS ? zero(eltype(weights)) :
+                      one(eltype(weights)), eachindex(EDGE_LIST))
+        return weights .* allowed
+    elseif length(weights) == length(OPTIMIZED_EDGE_IDS)
+        return vcat(zero(eltype(weights)), weights)
+    end
+    throw(DimensionMismatch("expected 9 optimized or 10 complete edge weights"))
+end
+
 function weighted_adjacency(weights)
-    dropdims(sum(reshape(weights, 1, 1, :) .* EDGE_BASIS; dims=3); dims=3)
+    complete = full_edge_weights(weights)
+    bounded = clamp.(complete, zero(eltype(complete)), one(eltype(complete)))
+    dropdims(sum(reshape(bounded, 1, 1, :) .* EDGE_BASIS; dims=3); dims=3)
+end
+
+binary_gaussian_penalty(weights, sigma) = mean(
+    TopologyBS.gaussfilter(weights, one(eltype(weights)) / 2, sigma))
+
+function scheduled_eta(schedule::Symbol, iteration, iterations, eta;
+                       phase=0.0, base=1e-5, period=iterations,
+                       parameters=200, warmups=200)
+    if schedule === :fixed
+        eta
+    elseif schedule === :inverse_sqrt
+        peak_iteration = max(1, round(Int,
+            warmups^(3/2) / sqrt(parameters)))
+        raw = TopologyBS.learningrate(iteration, parameters, warmups)
+        normalizer = TopologyBS.learningrate(
+            peak_iteration, parameters, warmups)
+        eta * raw / normalizer
+    elseif schedule === :cos
+        actual_period = period > 0 ? period : iterations
+        TopologyBS.cos_learningrate(
+            iteration, min(base, eta), eta, actual_period, phase)
+    else
+        throw(ArgumentError("unknown learning-rate schedule: $schedule"))
+    end
+end
+
+function adjust_eta(state, schedule, iteration, iterations, eta, phase;
+                    schedule_options...)
+    value = scheduled_eta(schedule, iteration, iterations, eta;
+                          phase, schedule_options...)
+    Optimisers.adjust(state; eta=convert(typeof(eta), value))
+end
+
+function target_stiffness(target, points)
+    n = length(points)
+    n >= 2 || throw(ArgumentError("at least two points are required"))
+    map(1:n) do i
+        left = max(1, i - 1)
+        right = min(n, i + 1)
+        (target[right, 1] - target[left, 1]) /
+            (points[right] - points[left])
+    end
+end
+
+function effective_stiffness_curve(model, beams, nodes, states, weights, points)
+    adjacency = weighted_adjacency(weights)
+    map(eachindex(points)) do index
+        displaced_nodes = moved_nodes(nodes, points[index])
+        solutions, solved_beams, _ = model(
+            states[:, :, index], beams, displaced_nodes, adjacency)
+        stiffness = TopologyBS.admittance_matrix(
+            solutions, adjacency, model, solved_beams)
+        TopologyBS.effective_stiffness(
+            stiffness, FIXED_STIFFNESS_DOFS => LOADED_STIFFNESS_DOFS)
+    end
+end
+
+function topology_stiffness_fit(model, beams, nodes, states, weights, points,
+                                target)
+    actual = effective_stiffness_curve(
+        model, beams, nodes, states, weights, points)
+    desired = target_stiffness(target, points)
+    scale = max(maximum(abs, desired), eps(eltype(desired)))
+    mean(abs2, (actual .- desired) ./ scale)
+end
+
+function topology_stiffness_loss(model, beams, nodes, states, weights, points,
+                                 target, discreteness_weight,
+                                 gaussian_sigma)
+    fit = topology_stiffness_fit(
+        model, beams, nodes, states, weights, points, target)
+    binary = binary_gaussian_penalty(
+        weights, eltype(weights)(gaussian_sigma))
+    fit + discreteness_weight * binary
 end
 
 """Construct node names directly, avoiding the ambiguous internal getnames call."""
@@ -75,6 +166,7 @@ function moved_nodes(nodes, displacement)
 end
 
 function moved_reaction(solutions, beams, nodes, weights)
+    weights = full_edge_weights(weights)
     beam_ids = TopologyBS.getindices(NODE_COUNT)
     incident = TopologyBS.findbeamsatnode(nodes.Node_5, MOVED_NODE, beam_ids)[1]
     reaction = mapreduce(index -> weights[index] .* TopologyBS.scaleforce(
@@ -90,7 +182,8 @@ function response(model, beams, nodes, states, weights, displacements)
         displaced_nodes = moved_nodes(nodes, displacements[index])
         solutions, solved_beams, solved_nodes = model(
             states[:, :, index], beams, displaced_nodes, adjacency)
-        residual = zeros(eltype(solutions), size(states, 1), size(states, 2))
+        residual = zeros(promote_type(eltype(solutions), eltype(weights)),
+                         size(states, 1), size(states, 2))
         residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
                                           solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
@@ -109,7 +202,8 @@ function loss_components(model, beams, nodes, states, weights, points, target,
         displaced_nodes = moved_nodes(nodes, points[index])
         solutions, solved_beams, solved_nodes = model(
             states[:, :, index], beams, displaced_nodes, adjacency)
-        residual = zeros(eltype(states), size(states, 1), size(states, 2))
+        residual = zeros(promote_type(eltype(states), eltype(weights)),
+                         size(states, 1), size(states, 2))
         residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
                                           solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
@@ -130,7 +224,8 @@ function equilibrium_loss(model, beams, nodes, states, weights, points)
         displaced_nodes = moved_nodes(nodes, points[index])
         solutions, solved_beams, solved_nodes = model(
             states[:, :, index], beams, displaced_nodes, adjacency)
-        residual = zeros(eltype(states), size(states, 1), size(states, 2))
+        residual = zeros(promote_type(eltype(states), eltype(weights)),
+                         size(states, 1), size(states, 2))
         residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
                                           solved_beams, solved_nodes)
         mean(abs2, residual_)
@@ -139,13 +234,15 @@ function equilibrium_loss(model, beams, nodes, states, weights, points)
 end
 
 function study_loss(model, beams, nodes, states, weights, points, target,
-                    scales, residual_weight, discreteness_weight=0.0)
+                    scales, residual_weight, discreteness_weight=0.0,
+                    gaussian_sigma=0.15)
     adjacency = weighted_adjacency(weights)
     samples = map(eachindex(points)) do index
         displaced_nodes = moved_nodes(nodes, points[index])
         solutions, solved_beams, solved_nodes = model(
             states[:, :, index], beams, displaced_nodes, adjacency)
-        residual = zeros(eltype(states), size(states, 1), size(states, 2))
+        residual = zeros(promote_type(eltype(states), eltype(weights)),
+                         size(states, 1), size(states, 2))
         residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
                                           solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
@@ -153,7 +250,8 @@ function study_loss(model, beams, nodes, states, weights, points, target,
             (reaction .- view(target, index, :)) ./ collect(scales))
         characteristic + residual_weight * mean(abs2, residual_)
     end
-    discreteness = mean(abs2, weights .* (one(eltype(weights)) .- weights))
+    discreteness = binary_gaussian_penalty(weights,
+                                            eltype(weights)(gaussian_sigma))
     mean(samples) + discreteness_weight * discreteness
 end
 
@@ -213,53 +311,33 @@ function optimize_equilibrium_full(model, beams, nodes, states, weights, points;
        residual_mse=equilibrium_loss(model, beams, nodes, states, weights, points))
 end
 
-function optimize_equilibrium_relaxed(model, beams, nodes, states, raw_weights,
-                                      points; eta, iterations,
-                                      callback=nothing)
-    beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
-    node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
-    value_state = Optimisers.setup(Optimisers.Adam(eta), states)
-    weight_state = Optimisers.setup(Optimisers.Adam(eta), raw_weights)
-    sigmoid(z) = one(eltype(z)) ./ (one(eltype(z)) .+ exp.(-z))
-    for iteration in 1:iterations
-        value, gradients = Zygote.withgradient(
-            (b, n, x, z) -> equilibrium_loss(
-                model, b, n, x, sigmoid(z), points),
-            beams, nodes, states, raw_weights)
-        isfinite(value) || error("non-finite equilibrium objective")
-        beam_state, beams = Optimisers.update(beam_state, beams, gradients[1])
-        node_state, nodes = Optimisers.update(node_state, nodes, gradients[2])
-        value_state, states = Optimisers.update(value_state, states, gradients[3])
-        weight_gradient_norm = norm(gradients[4])
-        weight_state, raw_weights = Optimisers.update(
-            weight_state, raw_weights, gradients[4])
-        weights = sigmoid(raw_weights)
-        isnothing(callback) || callback(iteration, value, norm(gradients[3]),
-                                        weight_gradient_norm, beams, nodes,
-                                        states, weights)
-    end
-    weights = sigmoid(raw_weights)
-    (; beams, nodes, states, raw_weights, weights,
-       residual_mse=equilibrium_loss(model, beams, nodes, states, weights, points))
-end
-
-function initial_parameters(rng, points)
+function initial_parameters(rng, points; zero_states=false)
     positions = Float32.(random_node_positions(rng; n=NODE_COUNT, gridsize=100))
     beams = make_beams(positions, rng)
     nodes = make_nodes(positions)
-    states = 0.01f0 .* randn(rng, Float32, 3,
-        length(BRANCH_NODES) + length(beams), length(points))
+    shape = (3, length(BRANCH_NODES) + length(beams), length(points))
+    states = zero_states ? zeros(Float32, shape) :
+             0.01f0 .* randn(rng, Float32, shape)
     (; beams, nodes, states)
 end
 
 function optimize_fixed(model, parameters, weights, points, target, scales,
-                        residual_weight; eta, iterations)
+                        residual_weight; eta, iterations, schedule=:fixed,
+                        schedule_options=NamedTuple(),
+                        learning_rates=(state=eta, beam=eta, node=eta))
     beams, nodes, states = parameters.beams, parameters.nodes, parameters.states
     beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
     node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
     value_state = Optimisers.setup(Optimisers.Adam(eta), states)
 
-    for _ in 1:iterations
+    phases = (beam=-2π/3, node=-4π/3, state=0.0)
+    for iteration in 1:iterations
+        beam_state = adjust_eta(beam_state, schedule, iteration, iterations,
+            learning_rates.beam, phases.beam; schedule_options...)
+        node_state = adjust_eta(node_state, schedule, iteration, iterations,
+            learning_rates.node, phases.node; schedule_options...)
+        value_state = adjust_eta(value_state, schedule, iteration, iterations,
+            learning_rates.state, phases.state; schedule_options...)
         value, gradients = Zygote.withgradient(
             (x, y, z) -> study_loss(model, x, y, z, weights, points, target,
                                      scales, residual_weight),
@@ -276,34 +354,141 @@ end
 
 function optimize_relaxed(model, parameters, raw_weights, points, target,
                           scales, residual_weight, discreteness_weight;
-                          eta, iterations)
+                          eta, iterations, gaussian_sigma=0.15,
+                          schedule=:fixed, schedule_options=NamedTuple(),
+                          learning_rates=(state=eta, beam=eta, node=eta,
+                                          adjacency=eta))
     beams, nodes, states = parameters.beams, parameters.nodes, parameters.states
     beam_state = Optimisers.setup(Optimisers.Adam(eta), beams)
     node_state = Optimisers.setup(Optimisers.Adam(eta), nodes)
     value_state = Optimisers.setup(Optimisers.Adam(eta), states)
-    weight_state = Optimisers.setup(Optimisers.Adam(eta), raw_weights)
+    weights = clamp.(raw_weights, zero(eltype(raw_weights)),
+                     one(eltype(raw_weights)))
+    weight_state = Optimisers.setup(Optimisers.Adam(eta), weights)
 
-    for _ in 1:iterations
-        value, gradients = Zygote.withgradient(
-            (w, x, y, z) -> begin
-                weights = one(eltype(z)) ./ (one(eltype(z)) .+ exp.(-z))
-                study_loss(model, w, x, y, weights, points, target, scales,
-                           residual_weight, discreteness_weight)
-            end,
-            beams, nodes, states, raw_weights)
+    phases = (beam=-π/2, node=-π, state=0.0, weight=-3π/2)
+    for iteration in 1:iterations
+        beam_state = adjust_eta(beam_state, schedule, iteration, iterations,
+            learning_rates.beam, phases.beam; schedule_options...)
+        node_state = adjust_eta(node_state, schedule, iteration, iterations,
+            learning_rates.node, phases.node; schedule_options...)
+        value_state = adjust_eta(value_state, schedule, iteration, iterations,
+            learning_rates.state, phases.state; schedule_options...)
+        weight_state = adjust_eta(weight_state, schedule, iteration, iterations,
+            learning_rates.adjacency, phases.weight; schedule_options...)
+        geometry_value, geometry_gradients = Zygote.withgradient(
+            (w, x, y) -> study_loss(
+                model, w, x, y, weights, points, target, scales,
+                residual_weight),
+            beams, nodes, states)
+        topology_value, topology_gradient = Zygote.withgradient(
+            a -> topology_stiffness_loss(
+                model, beams, nodes, states, a, points, target,
+                discreteness_weight, gaussian_sigma),
+            weights)
+        value = geometry_value + topology_value
+        gradients = geometry_gradients
+        weight_gradient = only(topology_gradient)
         isfinite(value) || error("non-finite optimization objective")
         beam_state, beams = Optimisers.update(beam_state, beams, gradients[1])
         node_state, nodes = Optimisers.update(node_state, nodes, gradients[2])
         value_state, states = Optimisers.update(value_state, states, gradients[3])
-        weight_state, raw_weights = Optimisers.update(
-            weight_state, raw_weights, gradients[4])
+        weight_state, weights = Optimisers.update(
+            weight_state, weights, weight_gradient)
+        weights = clamp.(weights, zero(eltype(weights)), one(eltype(weights)))
     end
-    weights = one(eltype(raw_weights)) ./
-              (one(eltype(raw_weights)) .+ exp.(-raw_weights))
     objective = study_loss(model, beams, nodes, states, weights, points, target,
-                           scales, residual_weight, discreteness_weight)
-    (; beams, nodes, states, raw_weights, weights, objective)
+                           scales, residual_weight) +
+                topology_stiffness_loss(
+                    model, beams, nodes, states, weights, points, target,
+                    discreteness_weight, gaussian_sigma)
+    (; beams, nodes, states, raw_weights=weights, weights, objective)
 end
+
+function discrete_reduction_path(model, parameters, relaxed_weights,
+                                 points, target, scales, residual_weight;
+                                 eta, iterations, residual_limit, schedule,
+                                 schedule_options, learning_rates)
+    order = sortperm(relaxed_weights)
+    mask = trues(length(EDGE_LIST))
+    mask[collect(IGNORED_EDGE_IDS)] .= false
+    current = parameters
+    rows = NamedTuple[]
+
+    function refine(mask, current, step, removed_edge, removed_weight)
+        discrete_weights = Float32.(mask)
+        refined = optimize_fixed(model, current, discrete_weights, points,
+            target, scales, residual_weight; eta, iterations, schedule,
+            schedule_options, learning_rates)
+        optimized = (; beams=refined.beams, nodes=refined.nodes,
+                     states=refined.states)
+        actual, residual = response(model, refined.beams, refined.nodes,
+                                    refined.states, discrete_weights, points)
+        normalized_mae = vec(mean(abs.(actual .- target); dims=1)) ./
+                         collect(scales)
+        curve_objective = sum(abs2, normalized_mae)
+        stiffness_error = topology_stiffness_fit(model, refined.beams,
+            refined.nodes, refined.states, discrete_weights, points, target)
+        (; step, removed_edge, removed_weight, mask=copy(mask),
+           parameters=optimized, residual, curve_objective,
+           optimization_objective=refined.objective, stiffness_error,
+           converged=isfinite(refined.objective) && residual <= residual_limit)
+    end
+
+    first_step = refine(mask, current, 0, 0, missing)
+    push!(rows, first_step)
+    current = first_step.parameters
+    step = 0
+    for local_index in order
+        edge = OPTIMIZED_EDGE_IDS[local_index]
+        candidate = copy(mask)
+        candidate[edge] = false
+        TopologyGeneration.is_admissible(candidate; n=NODE_COUNT,
+            clamp_nodes=CLAMP_NODES, branch_nodes=BRANCH_NODES,
+            minimum_branch_degree=2) || continue
+        step += 1
+        result = refine(candidate, current, step, edge,
+                        relaxed_weights[local_index])
+        push!(rows, result)
+        mask = candidate
+        current = result.parameters
+    end
+    elements(row) = count(row.mask)
+    dominates(a, b) =
+        a.curve_objective <= b.curve_objective &&
+        a.residual <= b.residual &&
+        elements(a) <= elements(b) &&
+        (a.curve_objective < b.curve_objective ||
+         a.residual < b.residual ||
+         elements(a) < elements(b))
+    pareto = map(eachindex(rows)) do i
+        !any(j -> j != i && dominates(rows[j], rows[i]), eachindex(rows))
+    end
+
+    function normalize_metric(values)
+        lo, hi = extrema(values)
+        hi == lo ? zeros(Float64, length(values)) :
+        Float64.((values .- lo) ./ (hi - lo))
+    end
+    pareto_indices = findall(pareto)
+    pareto_rows = rows[pareto_indices]
+    curve_score = normalize_metric(getproperty.(pareto_rows, :curve_objective))
+    residual_score = normalize_metric(getproperty.(pareto_rows, :residual))
+    element_score = normalize_metric(Float64.(elements.(pareto_rows)))
+    compromise_score = sqrt.(curve_score.^2 .+ residual_score.^2 .+
+                             element_score.^2)
+    selected_index = pareto_indices[argmin(compromise_score)]
+    score_by_index = Dict(pareto_indices .=> compromise_score)
+    annotated = map(eachindex(rows)) do i
+        (; rows[i]..., pareto=pareto[i],
+           selection_score=get(score_by_index, i, missing),
+           selected=i == selected_index)
+    end
+    (; rows=annotated, pareto=annotated[pareto], best=annotated[selected_index])
+end
+
+env_int(name, default) = parse(Int, get(ENV, name, string(default)))
+env_float(name, default) = parse(Float32, get(ENV, name, string(default)))
 
 function topology_study_case(kind, settings)
     points = Float32.(settings["evaluation_points"])
@@ -314,13 +499,55 @@ function topology_study_case(kind, settings)
         settings["target_force_scale"] * settings["grid_size"]))
     model = TopologyBS.GroundStructure()
     residual_weight = Float32(settings["equilibrium_weight"])
+    default_schedule = get(ENV, "BEAM_LEARNING_RATE_SCHEDULE",
+                           get(settings, "learning_rate_schedule", "fixed"))
+    fixed_schedule = Symbol(get(ENV, "BEAM_FIXED_SCHEDULE", default_schedule))
+    relaxed_schedule = Symbol(get(
+        ENV, "BEAM_RELAXED_SCHEDULE", default_schedule))
+    reduction_schedule = Symbol(get(
+        ENV, "BEAM_REDUCTION_SCHEDULE", default_schedule))
+    method1_iterations = env_int(
+        "BEAM_METHOD1_ITERATIONS", settings["adam_method1_iterations"])
+    method2_iterations = env_int(
+        "BEAM_METHOD2_ITERATIONS", settings["adam_method2_iterations"])
+    reduction_iterations = env_int(
+        "BEAM_REDUCTION_ITERATIONS",
+        get(settings, "reduction_iterations", method1_iterations))
+    default_scale = env_float("BEAM_LEARNING_RATE_SCALE", 1f0)
+    fixed_scale = env_float("BEAM_FIXED_LR_SCALE", default_scale)
+    relaxed_scale = env_float("BEAM_RELAXED_LR_SCALE", default_scale)
+    reduction_scale = env_float("BEAM_REDUCTION_LR_SCALE", default_scale)
+    schedule_options = (
+        base=Float32(get(settings, "learning_rate_base", 1e-5)),
+        period=get(settings, "learning_rate_period", 0),
+        parameters=get(settings, "learning_rate_parameters", 200),
+        warmups=get(settings, "learning_rate_warmups", 200))
+    base_rates = (
+        state=Float32(get(settings, "learning_rate_state_peak", 5e-3)),
+        beam=Float32(get(settings, "learning_rate_beam_peak", 1e-3)),
+        node=Float32(get(settings, "learning_rate_node_peak", 1e-3)),
+        adjacency=Float32(get(
+            settings, "learning_rate_adjacency_peak", 5e-4)))
+    scaled_rates(scale) = (
+        state=scale * base_rates.state,
+        beam=scale * base_rates.beam,
+        node=scale * base_rates.node,
+        adjacency=scale * base_rates.adjacency)
+    fixed_rates = scaled_rates(fixed_scale)
+    relaxed_rates = scaled_rates(relaxed_scale)
+    reduction_rates = scaled_rates(reduction_scale)
 
-    initial = (topology, rng) -> initial_parameters(rng, points)
+    initial = (topology, rng; zero_states=false) ->
+        initial_parameters(rng, points; zero_states)
     optimize = function(topology, parameters)
         weights = Float32.(topology.mask)
         result = optimize_fixed(model, parameters, weights, points, target,
             scales, residual_weight; eta=Float32(settings["adam_method1_eta"]),
-            iterations=settings["adam_method1_iterations"])
+            iterations=method1_iterations, schedule=fixed_schedule,
+            schedule_options,
+            learning_rates=(state=fixed_rates.state,
+                            beam=fixed_rates.beam,
+                            node=fixed_rates.node))
         final = response(model, result.beams, result.nodes, result.states,
                          weights, points)
         optimized = (; beams=result.beams, nodes=result.nodes,
@@ -328,7 +555,7 @@ function topology_study_case(kind, settings)
         (; parameters=optimized,
            converged=isfinite(result.objective) &&
                      final[2] <= settings["topology_residual_limit"],
-           residual=final[2])
+           residual=final[2], optimization_objective=result.objective)
     end
     evaluate = (topology, parameters, evaluation_points) -> begin
         Float32.(evaluation_points) == points ||
@@ -336,20 +563,57 @@ function topology_study_case(kind, settings)
         response(model, parameters.beams, parameters.nodes, parameters.states,
                  Float32.(topology.mask), points)[1]
     end
-    method2 = function(rng)
-        parameters = initial_parameters(rng, points)
-        # sigmoid(0) = 0.5 for every off-diagonal adjacency entry.
-        raw_weights = zeros(Float32, length(EDGE_LIST))
+    method2 = function(rng; zero_states=false)
+        parameters = initial_parameters(rng, points; zero_states)
+        raw_weights = clamp.(0.5f0 .+ 0.01f0 .* randn(
+            rng, Float32, length(OPTIMIZED_EDGE_IDS)), 0f0, 1f0)
         result = optimize_relaxed(model, parameters, raw_weights, points, target,
             scales, residual_weight, Float32(settings["discreteness_weight"]);
             eta=Float32(settings["adam_method2_eta"]),
-            iterations=settings["adam_method2_iterations"])
-        final = response(model, result.beams, result.nodes, result.states,
-                         result.weights, points)
-        (; mask=result.weights .>= settings["topology_threshold"],
-           converged=isfinite(result.objective) &&
-                     final[2] <= settings["topology_residual_limit"],
-           residual=final[2])
+            iterations=method2_iterations,
+            gaussian_sigma=Float32(settings["gaussian_sigma"]),
+            schedule=relaxed_schedule, schedule_options,
+            learning_rates=relaxed_rates)
+        relaxed_parameters = (; beams=result.beams, nodes=result.nodes,
+                              states=result.states)
+        relaxed_response = response(model, result.beams, result.nodes,
+                                    result.states, result.weights, points)
+        relaxed_stiffness_error = topology_stiffness_fit(
+            model, result.beams, result.nodes, result.states, result.weights,
+            points, target)
+        active_bounded = clamp.(result.weights, 0f0, 1f0)
+        bounded = full_edge_weights(active_bounded)
+        reduction = discrete_reduction_path(model, relaxed_parameters,
+            active_bounded, points, target, scales, residual_weight;
+            eta=Float32(settings["adam_method1_eta"]),
+            iterations=reduction_iterations,
+            residual_limit=settings["topology_residual_limit"],
+            schedule=reduction_schedule, schedule_options,
+            learning_rates=(state=reduction_rates.state,
+                            beam=reduction_rates.beam,
+                            node=reduction_rates.node))
+        best = reduction.best
+        discrete_weights = Float32.(best.mask)
+        (; mask=best.mask, parameters=best.parameters,
+           adjacency=weighted_adjacency(discrete_weights),
+           continuous_adjacency=weighted_adjacency(bounded),
+           weights=bounded,
+           converged=best.converged,
+           residual=best.residual,
+           relaxed_residual=relaxed_response[2],
+           optimization_objective=best.optimization_objective,
+           relaxed_optimization_objective=result.objective,
+           relaxed_stiffness_error,
+           discrete_stiffness_error=best.stiffness_error,
+           refined_stiffness_error=best.stiffness_error,
+           reduction_path=reduction.rows,
+           pareto_solutions=reduction.pareto,
+           gaussian_penalty=binary_gaussian_penalty(
+               active_bounded, Float32(settings["gaussian_sigma"])),
+           mean_binary_distance=mean(min.(active_bounded,
+                                          1f0 .- active_bounded)),
+           max_binary_distance=maximum(min.(active_bounded,
+                                             1f0 .- active_bounded)))
     end
     admissible = mask -> TopologyGeneration.is_admissible(mask;
         n=NODE_COUNT, clamp_nodes=CLAMP_NODES, branch_nodes=BRANCH_NODES,
@@ -357,6 +621,7 @@ function topology_study_case(kind, settings)
 
     (name=String(kind), node_count=NODE_COUNT, clamp_nodes=CLAMP_NODES,
      branch_nodes=BRANCH_NODES, minimum_branch_degree=2, scales,
+     evaluation_points=points, ignored_edges=IGNORED_EDGE_IDS,
      target=displacements -> target_characteristic(kind, displacements;
          force_scale=settings["target_force_scale"]),
      initial, optimize, evaluate, method2, admissible)

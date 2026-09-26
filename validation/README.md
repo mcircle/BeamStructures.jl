@@ -73,6 +73,21 @@ Lernrate und Ausgabe lassen sich über
 `BEAM_DIAGNOSTIC_ITERATIONS`, `BEAM_DIAGNOSTIC_ETA` und
 `BEAM_DIAGNOSTIC_OUTPUT` einstellen.
 
+Der für Methode 2 relevante Adjazenzgradient wird separat geprüft:
+
+```sh
+julia --project=validation validation/run_adjacency_diagnostic.jl
+```
+
+Der Test differenziert den vorgesehenen Pfad `admittance_matrix` →
+`effective_stiffness` mit Zygote und ForwardDiff. Die Sollsteifigkeit ist die
+numerische Ableitung der Sollkennlinie. Die zehn unabhängigen Kanten starten
+bei 0,5; daraus entsteht eine symmetrische 5×5-Adjazenzmatrix mit Nullen auf
+der Diagonalen. Nach jedem Adam-Schritt werden die Kantenwerte mit `clamp` auf
+`[0,1]` begrenzt. Gauß-Strafe und Binärdistanz werden als Diagnose
+protokolliert, beeinflussen die Optimierung bei
+`discreteness_weight = 0` jedoch nicht.
+
 ## LSF-Job-Array
 
 Nach einmaligem Einrichten der Validierungsumgebung wird die vollständige
@@ -92,9 +107,26 @@ METHOD1_SHARDS=16 METHOD2_SHARDS=4 MAX_CONCURRENT=8 \
   bash validation/lsf/submit_topology_study.sh
 ```
 
-Jeder Task schreibt kollisionsfrei nach `validation/results/lsf_shards/`.
-Nach erfolgreichem Abschluss des gesamten Arrays startet automatisch der
-Merge-Job. Die finalen CSVs liegen in `validation/results/lsf_merged/`.
+Jeder Studienlauf erhält standardmäßig eigene, datierte Verzeichnisse
+`validation/results/lsf_shards_<Zeitstempel>/` und
+`validation/results/lsf_shards_<Zeitstempel>_merged/`. Die konkreten Pfade
+werden beim Einreichen im Terminal ausgegeben. Nach erfolgreichem Abschluss
+des gesamten Arrays startet automatisch der Merge-Job. Eigene Pfade können
+vor dem Submit mit `BEAM_STUDY_OUTPUT` und `BEAM_STUDY_MERGED_OUTPUT`
+festgelegt werden.
+Für jede Sollkennlinie und Methode wird dort zusätzlich die Datei
+`<kennlinie>_<methode>_best_solution.jld2` erzeugt. Sie enthält mindestens
+`beams`, `nodes`, `solution` und `adjacency`; für Methode 2 wird außerdem die
+kontinuierliche Adjazenzmatrix gespeichert. Die Shard-Unterverzeichnisse und
+LSF-Logs bleiben nach dem Merge standardmäßig erhalten. Nur mit der expliziten
+Option `BEAM_STUDY_CLEAN_SHARDS=true` werden die erfolgreich
+zusammengeführten Shard-Dateien entfernt.
+
+Ein Merge in ein Zielverzeichnis mit bereits vorhandenen CSV-, JLD2- oder
+Metadatendateien bricht standardmäßig ab, ohne Dateien zu verändern. Zum
+bewussten Ersetzen dieser Dateien muss zusätzlich
+`BEAM_STUDY_OVERWRITE_OUTPUT=true` gesetzt werden. Sicherer ist ein neues,
+leeres Zielverzeichnis pro Studie.
 Schlägt ein Array-Task fehl, startet der Merge wegen der LSF-Bedingung
 `done(job_id)` nicht; nach dem erneuten Ausführen fehlender Tasks kann er
 manuell eingereicht werden:
@@ -116,17 +148,129 @@ Die Auslenkung läuft von -10 mm bis +10 mm. Es werden drei Sollkennlinien mit
 - Tal/negative Steifigkeit: `Fx/F0 = ξ³ - 0.55ξ`
 
 `Fy` und `Mz` sind jeweils null. Methode 1 optimiert jede graphisch zulässige
-binäre Adjazenzmatrix. Methode 2 optimiert kontinuierliche Kantenwerte und
-diskretisiert sie anschließend mit dem konfigurierten Schwellwert. Beide Wege
-verwenden `Optimisers.Adam`; Iterationszahl, Lernrate, Gleichgewichtsgewicht,
-Kraftskala und Schwellwert stehen in `config.toml`. Das Volumen wird weder
+binäre Adjazenzmatrix. Methode 2 optimiert kontinuierliche Kantenwerte als
+Relevanzmaß. Anschließend werden die Balken in aufsteigender Reihenfolge dieser
+Werte entfernt, sofern die Struktur zulässig bleibt. Geometrie und Zustände
+werden nach jedem akzeptierten Schritt erneut optimiert. Der gesamte
+Reduktionspfad mit Topologie, Balkenzahl, Kennlinienfehler, Residuum und
+Steifigkeitsfehler steht in `*_method2_runs.csv`. Nicht dominierte Lösungen
+werden als Pareto-Lösungen markiert. Falls ein einzelner Vorschlag benötigt
+wird, wird der Pareto-Punkt mit dem kleinsten normierten Abstand zum Idealpunkt
+aus Kennlinienfehler, Residuum und Balkenzahl gewählt. Zusätzlich wird je
+Sollkennlinie ein Lauf mit exakt null initialisierten Zuständen ausgeführt.
+Beide Wege verwenden `Optimisers.Adam`; Iterationszahlen, Lernraten und
+Gleichgewichtsgewicht stehen in `config.toml`. Das Volumen wird weder
 berechnet noch bewertet.
+
+Die Kante zwischen den beiden festen Einspannungen wird nicht optimiert und
+bleibt in beiden Methoden null. Die adaptive Lernrate wird mit
+`learning_rate_schedule` gewählt. Standardmäßig wird `inverse_sqrt` verwendet
+und so normiert, dass jede Parametergruppe ihren konfigurierten Maximalwert
+erreicht. Die Maximalwerte für Zustände, Balken, Knoten und Adjazenz stehen
+getrennt in `config.toml`. Für einen Vergleichslauf kann die Konfiguration ohne
+Dateiänderung überschrieben werden:
+
+```sh
+BEAM_LEARNING_RATE_SCHEDULE=inverse_sqrt \
+BEAM_STUDY_OUTPUT=validation/results/lsf_shards_inverse \
+BEAM_STUDY_MERGED_OUTPUT=validation/results/lsf_merged_inverse \
+  bash validation/lsf/submit_topology_study.sh
+```
+
+Zulässige Werte sind `fixed`, `inverse_sqrt` und `cos`. Für einen belastbaren
+Vergleich müssen die Varianten in getrennte Ergebnisverzeichnisse schreiben.
 
 Im Ergebnisordner liegen `topology_catalog.csv` sowie je Kennlinie
 `*_target.csv`, `*_method1_runs.csv`, `*_topology_summary.csv`,
 `*_method2_runs.csv` und `*_method2_comparison.csv`. Bei einem nicht
 konvergierten Referenzlauf bleiben die Vergleichswerte leer, statt den gesamten
 Versuch abzubrechen.
+
+Die Methode-2-CSV enthält zusätzlich die zehn kontinuierlichen Kantenwerte,
+Gauß-Strafe, mittleren und maximalen Abstand zur Binärlösung sowie die
+Steifigkeitsfehler vor Diskretisierung, direkt nach Diskretisierung und nach
+der festen Nachoptimierung mit Methode 1. Nur zulässige diskrete Topologien
+werden nachoptimiert und als beste Lösung berücksichtigt.
+
+## Parameterstudie auf Batch24
+
+Die Parameterstudie variiert getrennt für Methode 1, die relaxierte Methode 2
+und die diskrete Reduktion:
+
+- Iterationen: 500, 1000 und 2000
+- Schedule: `fixed`, `inverse_sqrt` und `cos`
+- Lernratenfaktor: 0,5, 1 und 2
+
+Standardmäßig werden nur die linear-progressive Kennlinie, fünf Seeds und ein
+zusätzlicher Nullzustandslauf untersucht. Die 594 logischen Teilaufgaben werden
+auf einen festen Pool von 96 Array-Jobs verteilt. Jeder Worker bearbeitet
+mehrere Teilaufgaben nacheinander; dadurch werden nicht hunderte einzelne Jobs
+im Scheduler angelegt:
+
+```sh
+bash validation/lsf/submit_parameter_study.sh
+```
+
+Die Parallelität und der Ausgabepfad können angepasst werden:
+
+```sh
+PARAM_WORKERS=64 \
+MAX_CONCURRENT=64 \
+PARAM_STUDY_OUTPUT=validation/results/parameter_study_run1 \
+  bash validation/lsf/submit_parameter_study.sh
+```
+
+Die Ergebnisse liegen getrennt nach Phase, Kennlinie und Parametersatz unter
+`PARAM_STUDY_OUTPUT`. Die jeweils nicht untersuchten Phasen verwenden
+`inverse_sqrt`, Lernratenfaktor 1 und die Basis-Iterationszahlen.
+
+Für die anschließende Hauptstudie verwendet Methode 1 je zulässiger Topologie
+und Sollkennlinie fünf zufällige Zustandsinitialisierungen sowie einen
+zusätzlichen Nullzustand. Methode 2 verwendet je Sollkennlinie 200 zufällige
+Initialisierungen der vollständigen relaxierten Kandidatenstruktur sowie einen
+zusätzlichen Nullzustand. Die jeweilige Initialisierungsart wird in den
+Laufdateien in der Spalte `initialization` gespeichert.
+
+Nach Abschluss werden sämtliche Shards ohne Änderung der Rohdaten aggregiert:
+
+```sh
+bash validation/lsf/aggregate_parameter_study.sh
+```
+
+Die kompakten Dateien liegen anschließend unter
+`validation/results/parameter_study/aggregated/`. Neben den drei Laufdateien
+werden eine gemeinsame Parameterzusammenfassung, eine Vollständigkeitsprüfung,
+die Pareto-Lösungen der Reduktionsphase und jeweils die beste JLD2-Lösung pro
+Phase erzeugt. Bei fehlenden Shards endet das Skript mit Exit-Code 2 und listet
+sie in `parameter_study_completeness.csv`.
+
+Die aggregierten Daten werden mit CairoMakie und dem LaTeX-Schriftthema
+ausgewertet:
+
+```sh
+julia --project=validation validation/run_parameter_study_evaluation.jl
+```
+
+Unter `validation/results/parameter_study/evaluation/` entstehen:
+
+- Heatmaps für Kennlinienfehler und Gleichgewichtsresiduum als PDF und PNG,
+- das Trade-off-Diagramm aus Kennlinienfehler und Residuum,
+- den Initialisierungsvergleich als gemeinsamen Trade-off aus Kennlinienfehler
+  und Gleichgewichtsresiduum,
+- das Pareto-Diagramm der Topologiereduktion mit lokalen und globalen Frontpunkten,
+- `global_pareto.csv` mit der globalen Dominanzprüfung über alle Läufe,
+- `selected_parameters.csv` und `selected_parameters.tex` für den Haupttext,
+- `appendix_parameter_table.csv` mit allen Parameterkonfigurationen.
+
+Alle Diagramme besitzen beschriftete Achsen und verwenden logarithmische
+Darstellungen nur dort, wo dies explizit in Achse oder Farbskala angegeben ist.
+Der automatisch ausgewählte Parametersatz minimiert den gleich gewichteten,
+normierten Abstand aus medianem Kennlinienfehler und medianem Residuum. Für
+Methode 2 und die Reduktion gehen zusätzlich das 90-%-Quantil des normierten
+Steifigkeitsfehlers und der Anteil der Läufe mit einem Steifigkeitsfehler über
+eins ein. Die Rechenzeit wird nicht bewertet; der kontrollierte Rechenaufwand
+wird in den Grafiken durch die Iterationszahl dargestellt. Diese Auswahl ist
+als Vorschlag zu prüfen, nicht als physikalisch zwingende Gewichtung.
 
 ## Eigene Optimierungsfälle
 
