@@ -8,5 +8,5 @@ set -euo pipefail
 cd "${LS_SUBCWD:?LS_SUBCWD is not set}"
 
 shard_root="${BEAM_STUDY_OUTPUT:-validation/results/lsf_shards}"
-merged_output="${BEAM_STUDY_MERGED_OUTPUT:-validation/results/lsf_merged}"
+merged_output="${BEAM_STUDY_MERGED_OUTPUT:-${shard_root}_merged}"
 julia --project=validation validation/merge_topology_shards.jl "${shard_root}" "${merged_output}"

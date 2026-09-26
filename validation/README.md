@@ -107,17 +107,26 @@ METHOD1_SHARDS=16 METHOD2_SHARDS=4 MAX_CONCURRENT=8 \
   bash validation/lsf/submit_topology_study.sh
 ```
 
-Jeder Task schreibt kollisionsfrei nach `validation/results/lsf_shards/`.
-Nach erfolgreichem Abschluss des gesamten Arrays startet automatisch der
-Merge-Job. Die finalen CSVs liegen in `validation/results/lsf_merged/`.
+Jeder Studienlauf erhält standardmäßig eigene, datierte Verzeichnisse
+`validation/results/lsf_shards_<Zeitstempel>/` und
+`validation/results/lsf_shards_<Zeitstempel>_merged/`. Die konkreten Pfade
+werden beim Einreichen im Terminal ausgegeben. Nach erfolgreichem Abschluss
+des gesamten Arrays startet automatisch der Merge-Job. Eigene Pfade können
+vor dem Submit mit `BEAM_STUDY_OUTPUT` und `BEAM_STUDY_MERGED_OUTPUT`
+festgelegt werden.
 Für jede Sollkennlinie und Methode wird dort zusätzlich die Datei
 `<kennlinie>_<methode>_best_solution.jld2` erzeugt. Sie enthält mindestens
 `beams`, `nodes`, `solution` und `adjacency`; für Methode 2 wird außerdem die
-kontinuierliche Adjazenzmatrix gespeichert. Nach einem vollständig erfolgreichen
-Merge werden die zusammengeführten Dateien aus den eindeutig erkannten
-Shard-Unterverzeichnissen standardmäßig entfernt. Mit
-`BEAM_STUDY_CLEAN_SHARDS=false` bleiben die Zwischenstände erhalten. Die
-LSF-Logs werden nicht automatisch gelöscht.
+kontinuierliche Adjazenzmatrix gespeichert. Die Shard-Unterverzeichnisse und
+LSF-Logs bleiben nach dem Merge standardmäßig erhalten. Nur mit der expliziten
+Option `BEAM_STUDY_CLEAN_SHARDS=true` werden die erfolgreich
+zusammengeführten Shard-Dateien entfernt.
+
+Ein Merge in ein Zielverzeichnis mit bereits vorhandenen CSV-, JLD2- oder
+Metadatendateien bricht standardmäßig ab, ohne Dateien zu verändern. Zum
+bewussten Ersetzen dieser Dateien muss zusätzlich
+`BEAM_STUDY_OVERWRITE_OUTPUT=true` gesetzt werden. Sicherer ist ein neues,
+leeres Zielverzeichnis pro Studie.
 Schlägt ein Array-Task fehl, startet der Merge wegen der LSF-Bedingung
 `done(job_id)` nicht; nach dem erneuten Ausführen fehlender Tasks kann er
 manuell eingereicht werden:

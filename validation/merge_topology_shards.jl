@@ -62,12 +62,23 @@ for case in cases, method in (:method1, :method2)
         error("$method shards missing for $(case.name)")
 end
 
-for name in readdir(output)
+generated_outputs = filter(readdir(output)) do name
     path = joinpath(output, name)
-    isfile(path) || continue
-    if endswith(name, ".csv") || endswith(name, ".jld2") ||
-       name in ("metadata.toml", "Manifest.toml")
-        rm(path)
+    isfile(path) &&
+        (endswith(name, ".csv") || endswith(name, ".jld2") ||
+         name in ("metadata.toml", "Manifest.toml"))
+end
+overwrite_output = lowercase(get(
+    ENV, "BEAM_STUDY_OVERWRITE_OUTPUT", "false")) in
+    ("1", "true", "yes")
+if !isempty(generated_outputs) && !overwrite_output
+    error("merge output already contains generated files: $output; " *
+          "choose an empty output directory or explicitly set " *
+          "BEAM_STUDY_OVERWRITE_OUTPUT=true")
+end
+if overwrite_output
+    for name in generated_outputs
+        rm(joinpath(output, name))
     end
 end
 
@@ -128,7 +139,7 @@ end
 
 println("Merged $(length(files)) shards into $output")
 
-cleanup = lowercase(get(ENV, "BEAM_STUDY_CLEAN_SHARDS", "true")) in
+cleanup = lowercase(get(ENV, "BEAM_STUDY_CLEAN_SHARDS", "false")) in
           ("1", "true", "yes")
 if cleanup
     root_path = realpath(root)
