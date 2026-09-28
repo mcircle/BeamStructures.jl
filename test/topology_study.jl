@@ -144,6 +144,21 @@ end
         MersenneTwister(7), [-10.0f0, 0.0f0, 10.0f0]; zero_states=true)
     @test all(iszero, zero_parameters.states)
 
+    sparse_mask = Bool[0, 1, 0, 0, 1, 0, 1, 1, 0, 1]
+    compact = extract_topology_parameters(parameters, sparse_mask)
+    @test collect(keys(compact.beams)) ==
+          [:Beam_2, :Beam_5, :Beam_7, :Beam_8, :Beam_10]
+    @test length(compact.beams) == count(sparse_mask) == 5
+    @test compact.beams == NamedTuple{
+        (:Beam_2, :Beam_5, :Beam_7, :Beam_8, :Beam_10)}((
+            parameters.beams.Beam_2, parameters.beams.Beam_5,
+            parameters.beams.Beam_7, parameters.beams.Beam_8,
+            parameters.beams.Beam_10))
+    @test compact.states == parameters.states[:, [1, 2, 4, 7, 9, 10, 12], :]
+    sparse_adjacency = weighted_adjacency(Float32.(sparse_mask))
+    compact_model = BS.Structure(sparse_adjacency)
+    @test BS.getstartnodes(compact_model) == [1, 2, 2, 3, 4]
+
     beam = parameters.beams.Beam_1
     beam_vector = Float32[beam...]
     for fun in (BS.normfactor_m, BS.normfactor_f)
@@ -176,4 +191,13 @@ end
         smoke.beams, smoke.nodes, smoke.states)
     @test isfinite(value)
     @test length(gradients) == 3
+
+    compact_smoke = extract_topology_parameters(smoke, sparse_mask)
+    compact_value, compact_gradients = Zygote.withgradient(
+        (beams, nodes, states) -> study_loss(compact_model, beams, nodes, states,
+            Float32.(sparse_mask), smoke_points, target,
+            (10.0f0, 10.0f0, 1000.0f0), 1.0f0),
+        compact_smoke.beams, compact_smoke.nodes, compact_smoke.states)
+    @test isfinite(compact_value)
+    @test length(compact_gradients) == 3
 end

@@ -104,8 +104,10 @@ end
 
 function admittance_matrix(sol::AbstractArray{T,N},adj,str,beams) where{T,N}
     # adj = sigmoid(adj)
-    idxs = getindices(size(adj,1))
     lensol = length(beams)
+    complete_count = size(adj, 1) * (size(adj, 1) - 1) ÷ 2
+    idxs = lensol == complete_count ? getindices(size(adj, 1)) :
+           nonzero_lower_indices(adj, lensol)
     
     prob_func = make_vjp_func(sol,beams)
     #dadj Gradient der Steifigkeitsmatrix berechnen  

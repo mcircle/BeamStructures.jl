@@ -102,8 +102,8 @@ function effective_stiffness_curve(model, beams, nodes, states, weights, points)
     adjacency = weighted_adjacency(weights)
     map(eachindex(points)) do index
         displaced_nodes = moved_nodes(nodes, points[index])
-        solutions, solved_beams, _ = model(
-            states[:, :, index], beams, displaced_nodes, adjacency)
+        solutions, solved_beams, _ = solve_model(
+            model, states[:, :, index], beams, displaced_nodes, adjacency)
         stiffness = TopologyBS.admittance_matrix(
             solutions, adjacency, model, solved_beams)
         TopologyBS.effective_stiffness(
@@ -165,12 +165,31 @@ function moved_nodes(nodes, displacement)
     (; nodes..., Node_5=moved)
 end
 
+solve_model(model::TopologyBS.GroundStructure, state, beams, nodes, adjacency) =
+    model(state, beams, nodes, adjacency)
+solve_model(model::TopologyBS.Structure, state, beams, nodes, adjacency) =
+    model(state, beams, nodes)
+
+structure_residual!(residual, model::TopologyBS.GroundStructure, adjacency,
+                    solutions, beams, nodes) =
+    TopologyBS.residuals!(residual, adjacency, solutions, beams, nodes)
+structure_residual!(residual, model::TopologyBS.Structure, adjacency,
+                    solutions, beams, nodes) =
+    TopologyBS.residuals!(residual, model, solutions, beams, nodes)
+
 function moved_reaction(solutions, beams, nodes, weights)
     weights = full_edge_weights(weights)
-    beam_ids = TopologyBS.getindices(NODE_COUNT)
-    incident = TopologyBS.findbeamsatnode(nodes.Node_5, MOVED_NODE, beam_ids)[1]
-    reaction = mapreduce(index -> weights[index] .* TopologyBS.scaleforce(
-        beams[index], solutions[[1, 5, 6], 2, index]), +, incident;
+    complete_count = length(EDGE_LIST)
+    global_ids = length(beams) == complete_count ? collect(1:complete_count) :
+                 findall(!iszero, weights)
+    length(global_ids) == length(beams) || throw(DimensionMismatch(
+        "weights select $(length(global_ids)) beams, got $(length(beams)) beam parameters"))
+    incident = findall(local_index -> MOVED_NODE in EDGE_LIST[global_ids[local_index]],
+                       eachindex(global_ids))
+    reaction = mapreduce(local_index ->
+        weights[global_ids[local_index]] .* TopologyBS.scaleforce(
+            beams[local_index], solutions[[1, 5, 6], 2, local_index]), +,
+        incident;
         init=zeros(eltype(solutions), 3))
     # Beam state ordering is (Mz, Fx, Fy); output ordering is (Fx, Fy, Mz).
     reaction[[2, 3, 1]]
@@ -180,12 +199,12 @@ function response(model, beams, nodes, states, weights, displacements)
     adjacency = weighted_adjacency(weights)
     samples = map(eachindex(displacements)) do index
         displaced_nodes = moved_nodes(nodes, displacements[index])
-        solutions, solved_beams, solved_nodes = model(
-            states[:, :, index], beams, displaced_nodes, adjacency)
+        solutions, solved_beams, solved_nodes = solve_model(
+            model, states[:, :, index], beams, displaced_nodes, adjacency)
         residual = zeros(promote_type(eltype(solutions), eltype(weights)),
                          size(states, 1), size(states, 2))
-        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
-                                          solved_beams, solved_nodes)
+        residual_ = structure_residual!(residual, model, adjacency, solutions,
+                                        solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
         (reaction, residual_)
     end
@@ -200,12 +219,12 @@ function loss_components(model, beams, nodes, states, weights, points, target,
     adjacency = weighted_adjacency(weights)
     samples = map(eachindex(points)) do index
         displaced_nodes = moved_nodes(nodes, points[index])
-        solutions, solved_beams, solved_nodes = model(
-            states[:, :, index], beams, displaced_nodes, adjacency)
+        solutions, solved_beams, solved_nodes = solve_model(
+            model, states[:, :, index], beams, displaced_nodes, adjacency)
         residual = zeros(promote_type(eltype(states), eltype(weights)),
                          size(states, 1), size(states, 2))
-        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
-                                          solved_beams, solved_nodes)
+        residual_ = structure_residual!(residual, model, adjacency, solutions,
+                                        solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
         characteristic = mean(abs2,
             (reaction .- view(target, index, :)) ./ collect(scales))
@@ -222,12 +241,12 @@ function equilibrium_loss(model, beams, nodes, states, weights, points)
     adjacency = weighted_adjacency(weights)
     losses = map(eachindex(points)) do index
         displaced_nodes = moved_nodes(nodes, points[index])
-        solutions, solved_beams, solved_nodes = model(
-            states[:, :, index], beams, displaced_nodes, adjacency)
+        solutions, solved_beams, solved_nodes = solve_model(
+            model, states[:, :, index], beams, displaced_nodes, adjacency)
         residual = zeros(promote_type(eltype(states), eltype(weights)),
                          size(states, 1), size(states, 2))
-        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
-                                          solved_beams, solved_nodes)
+        residual_ = structure_residual!(residual, model, adjacency, solutions,
+                                        solved_beams, solved_nodes)
         mean(abs2, residual_)
     end
     mean(losses)
@@ -239,12 +258,12 @@ function study_loss(model, beams, nodes, states, weights, points, target,
     adjacency = weighted_adjacency(weights)
     samples = map(eachindex(points)) do index
         displaced_nodes = moved_nodes(nodes, points[index])
-        solutions, solved_beams, solved_nodes = model(
-            states[:, :, index], beams, displaced_nodes, adjacency)
+        solutions, solved_beams, solved_nodes = solve_model(
+            model, states[:, :, index], beams, displaced_nodes, adjacency)
         residual = zeros(promote_type(eltype(states), eltype(weights)),
                          size(states, 1), size(states, 2))
-        residual_ = TopologyBS.residuals!(residual, adjacency, solutions,
-                                          solved_beams, solved_nodes)
+        residual_ = structure_residual!(residual, model, adjacency, solutions,
+                                        solved_beams, solved_nodes)
         reaction = moved_reaction(solutions, solved_beams, solved_nodes, weights)
         characteristic = mean(abs2,
             (reaction .- view(target, index, :)) ./ collect(scales))
@@ -319,6 +338,26 @@ function initial_parameters(rng, points; zero_states=false)
     states = zero_states ? zeros(Float32, shape) :
              0.01f0 .* randn(rng, Float32, shape)
     (; beams, nodes, states)
+end
+
+function extract_topology_parameters(parameters, mask)
+    length(mask) == length(EDGE_LIST) || throw(DimensionMismatch(
+        "topology mask must contain $(length(EDGE_LIST)) entries"))
+    active_ids = findall(!iszero, mask)
+    isempty(active_ids) && throw(ArgumentError("topology must contain a beam"))
+    source_names = collect(keys(parameters.beams))
+    active_names = Symbol.("Beam_" .* string.(active_ids))
+    local_ids = map(active_names) do name
+        index = findfirst(==(name), source_names)
+        isnothing(index) && throw(ArgumentError("beam $name is not available"))
+        index
+    end
+    beams = NamedTuple{Tuple(active_names)}(Tuple(parameters.beams[i]
+        for i in local_ids))
+    branch_ids = collect(1:length(BRANCH_NODES))
+    state_ids = vcat(branch_ids, length(BRANCH_NODES) .+ local_ids)
+    states = parameters.states[:, state_ids, :]
+    (; beams, nodes=parameters.nodes, states)
 end
 
 function optimize_fixed(model, parameters, weights, points, target, scales,
@@ -417,17 +456,19 @@ function discrete_reduction_path(model, parameters, relaxed_weights,
 
     function refine(mask, current, step, removed_edge, removed_weight)
         discrete_weights = Float32.(mask)
-        refined = optimize_fixed(model, current, discrete_weights, points,
+        active = extract_topology_parameters(current, mask)
+        fixed_model = TopologyBS.Structure(weighted_adjacency(discrete_weights))
+        refined = optimize_fixed(fixed_model, active, discrete_weights, points,
             target, scales, residual_weight; eta, iterations, schedule,
             schedule_options, learning_rates)
         optimized = (; beams=refined.beams, nodes=refined.nodes,
                      states=refined.states)
-        actual, residual = response(model, refined.beams, refined.nodes,
+        actual, residual = response(fixed_model, refined.beams, refined.nodes,
                                     refined.states, discrete_weights, points)
         normalized_mae = vec(mean(abs.(actual .- target); dims=1)) ./
                          collect(scales)
         curve_objective = sum(abs2, normalized_mae)
-        stiffness_error = topology_stiffness_fit(model, refined.beams,
+        stiffness_error = topology_stiffness_fit(fixed_model, refined.beams,
             refined.nodes, refined.states, discrete_weights, points, target)
         (; step, removed_edge, removed_weight, mask=copy(mask),
            parameters=optimized, residual, curve_objective,
@@ -497,7 +538,7 @@ function topology_study_case(kind, settings)
     scales = Float32.((settings["target_force_scale"],
         settings["target_force_scale"],
         settings["target_force_scale"] * settings["grid_size"]))
-    model = TopologyBS.GroundStructure()
+    ground_model = TopologyBS.GroundStructure()
     residual_weight = Float32(settings["equilibrium_weight"])
     default_schedule = get(ENV, "BEAM_LEARNING_RATE_SCHEDULE",
                            get(settings, "learning_rate_schedule", "fixed"))
@@ -538,17 +579,19 @@ function topology_study_case(kind, settings)
     reduction_rates = scaled_rates(reduction_scale)
 
     initial = (topology, rng; zero_states=false) ->
-        initial_parameters(rng, points; zero_states)
+        extract_topology_parameters(
+            initial_parameters(rng, points; zero_states), topology.mask)
     optimize = function(topology, parameters)
         weights = Float32.(topology.mask)
-        result = optimize_fixed(model, parameters, weights, points, target,
+        fixed_model = TopologyBS.Structure(weighted_adjacency(weights))
+        result = optimize_fixed(fixed_model, parameters, weights, points, target,
             scales, residual_weight; eta=Float32(settings["adam_method1_eta"]),
             iterations=method1_iterations, schedule=fixed_schedule,
             schedule_options,
             learning_rates=(state=fixed_rates.state,
                             beam=fixed_rates.beam,
                             node=fixed_rates.node))
-        final = response(model, result.beams, result.nodes, result.states,
+        final = response(fixed_model, result.beams, result.nodes, result.states,
                          weights, points)
         optimized = (; beams=result.beams, nodes=result.nodes,
                      states=result.states)
@@ -560,14 +603,16 @@ function topology_study_case(kind, settings)
     evaluate = (topology, parameters, evaluation_points) -> begin
         Float32.(evaluation_points) == points ||
             throw(ArgumentError("adapter evaluates the configured displacement grid"))
-        response(model, parameters.beams, parameters.nodes, parameters.states,
+        fixed_model = TopologyBS.Structure(
+            weighted_adjacency(Float32.(topology.mask)))
+        response(fixed_model, parameters.beams, parameters.nodes, parameters.states,
                  Float32.(topology.mask), points)[1]
     end
     method2 = function(rng; zero_states=false)
         parameters = initial_parameters(rng, points; zero_states)
         raw_weights = clamp.(0.5f0 .+ 0.01f0 .* randn(
             rng, Float32, length(OPTIMIZED_EDGE_IDS)), 0f0, 1f0)
-        result = optimize_relaxed(model, parameters, raw_weights, points, target,
+        result = optimize_relaxed(ground_model, parameters, raw_weights, points, target,
             scales, residual_weight, Float32(settings["discreteness_weight"]);
             eta=Float32(settings["adam_method2_eta"]),
             iterations=method2_iterations,
@@ -576,14 +621,14 @@ function topology_study_case(kind, settings)
             learning_rates=relaxed_rates)
         relaxed_parameters = (; beams=result.beams, nodes=result.nodes,
                               states=result.states)
-        relaxed_response = response(model, result.beams, result.nodes,
+        relaxed_response = response(ground_model, result.beams, result.nodes,
                                     result.states, result.weights, points)
         relaxed_stiffness_error = topology_stiffness_fit(
-            model, result.beams, result.nodes, result.states, result.weights,
+            ground_model, result.beams, result.nodes, result.states, result.weights,
             points, target)
         active_bounded = clamp.(result.weights, 0f0, 1f0)
         bounded = full_edge_weights(active_bounded)
-        reduction = discrete_reduction_path(model, relaxed_parameters,
+        reduction = discrete_reduction_path(ground_model, relaxed_parameters,
             active_bounded, points, target, scales, residual_weight;
             eta=Float32(settings["adam_method1_eta"]),
             iterations=reduction_iterations,
