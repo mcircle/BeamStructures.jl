@@ -332,6 +332,43 @@ Die beste erfolgreich nachoptimierte Referenz ist **kein bewiesenes globales
 Optimum**. Der unmittelbare Diskretisierungsschritt übernimmt keinen
 Konvergenznachweis der relaxierten Lösung.
 
+## Einzelne Strukturen prüfen, darstellen und optimieren
+
+`run_single_structure.jl` verarbeitet Methode 1 und Methode 2 getrennt oder
+gemeinsam. Im Standardmodus `inspect` lädt es die gespeicherten Bestlösungen,
+löst ihre Kennlinie und das Gleichgewichtsresiduum erneut und erzeugt je
+Methode eine Struktur-/Kennliniengrafik als PNG und PDF. Zusätzlich werden
+Kennlinie, Kennwerte und die geprüfte Lösung als CSV beziehungsweise JLD2
+gespeichert:
+
+```sh
+julia --project=validation validation/run_single_structure.jl \
+  linear_progressive validation/results/topology_... \
+  validation/results/single_linear
+```
+
+Mit `BEAM_SINGLE_ACTION=optimize` wird ein einzelner Fall neu optimiert. Für
+Methode 1 wird die Topologie entweder aus der Bestlösung im Eingabeordner oder
+aus `BEAM_SINGLE_TOPOLOGY` übernommen. Methode 2 führt einen einzelnen Seed
+einschließlich Diskretisierung und fester Nachoptimierung aus:
+
+```sh
+BEAM_SINGLE_ACTION=optimize \
+BEAM_SINGLE_METHOD=both \
+BEAM_SINGLE_TOPOLOGY=0100101101 \
+BEAM_SINGLE_SEED=11 \
+  julia --project=validation validation/run_single_structure.jl \
+  linear_progressive validation/results/topology_... \
+  validation/results/single_optimized
+```
+
+`BEAM_SINGLE_METHOD` akzeptiert `method1`, `method2` oder `both`.
+`BEAM_SINGLE_ZERO_STATES=true` verwendet Nullzustände. Ohne expliziten Seed
+beziehungsweise Methode-1-Topologie werden diese, soweit vorhanden, aus der
+jeweiligen Bestlösung übernommen. Die Iterations- und Lernratenoptionen aus
+`config.toml` sowie die vorhandenen `BEAM_METHOD1_ITERATIONS`,
+`BEAM_METHOD2_ITERATIONS` und `BEAM_REDUCTION_ITERATIONS` gelten unverändert.
+
 Vergleiche loss(discrete)-loss(relaxed) und loss(refined)-loss(discrete)
 innerhalb desselben Seeds/Schwellenwerts. Bewerte Balkenanzahl/Volumen gemeinsam
 mit Funktionsfehler, Konvergenzquote und Laufzeit. Neue Strukturen müssen das
