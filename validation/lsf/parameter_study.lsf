@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+#BSUB -n 1
+#BSUB -W 48:00
+#BSUB -R "rusage[mem=4096]"
+
+set -euo pipefail
+cd "${LS_SUBCWD:?LS_SUBCWD is not set}"
+
+method1_shards="${METHOD1_SHARDS:-12}"
+method2_shards="${METHOD2_SHARDS:-5}"
+worker_count="${PARAM_WORKERS:-96}"
+configurations=27
+method1_tasks=$((configurations * method1_shards))
+method2_tasks=$((configurations * method2_shards))
+total_tasks=$((method1_tasks + 2 * method2_tasks))
+worker_zero=$((LSB_JOBINDEX - 1))
+
+run_logical_task() {
+  local task_zero="$1"
+  local phase method local_task shard_count
+
+  if (( task_zero < method1_tasks )); then
+    phase="method1"
+    method="method1"
+    local_task="${task_zero}"
+    shard_count="${method1_shards}"
+  elif (( task_zero < method1_tasks + method2_tasks )); then
+    phase="method2"
+    method="method2"
+    local_task=$((task_zero - method1_tasks))
+    shard_count="${method2_shards}"
+  else
+    phase="reduction"
+    method="method2"
+    local_task=$((task_zero - method1_tasks - method2_tasks))
+    shard_count="${method2_shards}"
+  fi
+
+  local config_zero=$((local_task / shard_count))
+  local shard_index=$((local_task % shard_count + 1))
+  local iteration_index=$((config_zero / 9))
+  local schedule_index=$(((config_zero % 9) / 3))
+  local rate_index=$((config_zero % 3))
+
+  local iterations=(500 1000 2000)
+  local schedules=(fixed inverse_sqrt cos)
+  local rate_scales=(0.5 1.0 2.0)
+  local rate_labels=(0p5 1p0 2p0)
+
+  local iteration="${iterations[${iteration_index}]}"
+  local schedule="${schedules[${schedule_index}]}"
+  local rate_scale="${rate_scales[${rate_index}]}"
+  local rate_label="${rate_labels[${rate_index}]}"
+
+  case "${phase}" in
+    method1)
+      export BEAM_METHOD1_ITERATIONS="${iteration}"
+      export BEAM_METHOD2_ITERATIONS="${PARAM_METHOD2_BASE_ITERATIONS:-1000}"
+      export BEAM_REDUCTION_ITERATIONS="${PARAM_REDUCTION_BASE_ITERATIONS:-500}"
+      export BEAM_FIXED_SCHEDULE="${schedule}"
+      export BEAM_FIXED_LR_SCALE="${rate_scale}"
+      export BEAM_RELAXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+      export BEAM_RELAXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+      export BEAM_REDUCTION_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+      export BEAM_REDUCTION_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+      ;;
+    method2)
+      export BEAM_METHOD1_ITERATIONS="${PARAM_METHOD1_BASE_ITERATIONS:-500}"
+      export BEAM_METHOD2_ITERATIONS="${iteration}"
+      export BEAM_REDUCTION_ITERATIONS="${PARAM_REDUCTION_BASE_ITERATIONS:-500}"
+      export BEAM_FIXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+      export BEAM_FIXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+      export BEAM_RELAXED_SCHEDULE="${schedule}"
+      export BEAM_RELAXED_LR_SCALE="${rate_scale}"
+      export BEAM_REDUCTION_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+      export BEAM_REDUCTION_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+      ;;
+    reduction)
+      export BEAM_METHOD1_ITERATIONS="${PARAM_METHOD1_BASE_ITERATIONS:-500}"
+      export BEAM_METHOD2_ITERATIONS="${PARAM_METHOD2_BASE_ITERATIONS:-1000}"
+      export BEAM_REDUCTION_ITERATIONS="${iteration}"
+      export BEAM_FIXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+      export BEAM_FIXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+      export BEAM_RELAXED_SCHEDULE="${PARAM_BASE_SCHEDULE:-inverse_sqrt}"
+      export BEAM_RELAXED_LR_SCALE="${PARAM_BASE_LR_SCALE:-1.0}"
+      export BEAM_REDUCTION_SCHEDULE="${schedule}"
+      export BEAM_REDUCTION_LR_SCALE="${rate_scale}"
+      ;;
+  esac
+
+  local study_case="${PARAM_STUDY_CASE:-linear_progressive}"
+  local config_name="cfg_$((config_zero + 1))_${schedule}_i${iteration}_lr${rate_label}"
+  local output_root="${PARAM_STUDY_OUTPUT:-validation/results/parameter_study}"
+
+  export BEAM_STUDY_METHOD="${method}"
+  export BEAM_STUDY_CASE="${study_case}"
+  export BEAM_STUDY_SHARD_INDEX="${shard_index}"
+  export BEAM_STUDY_SHARD_COUNT="${shard_count}"
+  export BEAM_STUDY_OUTPUT="${output_root}/${phase}/${study_case}/${config_name}"
+
+  echo "Worker ${LSB_JOBINDEX}: logical task $((task_zero + 1))/${total_tasks}, ${phase}, config $((config_zero + 1)), shard ${shard_index}/${shard_count}"
+  julia --project=validation validation/run_topology_shard.jl
+}
+
+for ((logical_task = worker_zero; logical_task < total_tasks; logical_task += worker_count)); do
+  run_logical_task "${logical_task}"
+done

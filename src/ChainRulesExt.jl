@@ -907,9 +907,9 @@ function CRC.rrule(::typeof(admittance_matrix),solfw::AbstractArray{T,N},adj,str
             # Pullback der Transformationen von d
 
             Δd[2, :] .-= y .* Δd[1, :]
-            Δd[3,:]  .-= x .* Δd[1, :] 
-            # Δd[1, :] .*= -1
-            Δd .-= (view(ȳ,i_,i_) + view(ȳ,j_,j_))
+            Δd[3, :] .-= x .* Δd[1, :]
+            Δd[1, :] .*= -1
+            Δd .+= view(ȳ,i_,i_) + view(ȳ,j_,j_)
 
             # Pullback der elementweisen Multiplikation mit d0
             ∂adj[id] += sum(d0 .* Δd ) 

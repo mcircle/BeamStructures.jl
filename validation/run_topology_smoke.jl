@@ -12,6 +12,7 @@ settings = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
 settings["evaluation_points"] = [-10.0, 10.0]
 settings["adam_method1_iterations"] = 1
 settings["adam_method2_iterations"] = 1
+settings["reduction_iterations"] = 1
 
 include("topology_adapter.jl")
 
@@ -20,8 +21,9 @@ output = get(ENV, "BEAM_TOPOLOGY_SMOKE_OUTPUT",
 mkpath(output)
 record_environment(output; settings)
 
-topologies = enumerate_topologies()[1:1]
 cases = topology_study_cases(settings)
+topologies = filter(t -> all(!t.mask[i] for i in first(cases).ignored_edges),
+                    enumerate_topologies())[1:1]
 points = settings["evaluation_points"]
 write_study_inputs(topologies, cases, points, output)
 

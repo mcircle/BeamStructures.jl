@@ -35,7 +35,8 @@ Statistics = "1.11.1"
 [extras]
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "ForwardDiff", "TOML"]
+test = ["Test", "ForwardDiff", "JLD2", "TOML"]
