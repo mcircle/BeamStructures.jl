@@ -1,5 +1,6 @@
 using Test
 using LinearAlgebra
+using Random
 using ForwardDiff
 using Zygote
 import ChainRulesCore as CRC

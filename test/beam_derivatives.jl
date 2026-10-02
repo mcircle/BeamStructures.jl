@@ -35,7 +35,7 @@ end
     @test BS.forcesbackatstart!(state_tangent,tangent,force_tangent,state,beams,Int[]) === tangent
 end
 
-function one_sided_branch_loss(parameters,orientation)
+function one_sided_branch_model(parameters,orientation)
     beam(offset) = BS.Beam(parameters[offset:offset+6]...)
     beams = (Beam_1=beam(1),Beam_2=beam(8),Beam_3=beam(15))
     if orientation === :incoming
@@ -51,10 +51,22 @@ function one_sided_branch_loss(parameters,orientation)
                  Node_4=BS.Clamp(50.0,50.0,0.0,0.0,0.0,0.0))
         structure = BS.Structure([0.0 0 1 0;0 0 1 1;1 1 0 0;0 1 0 0])
     end
+    structure,beams,nodes
+end
+
+function one_sided_branch_loss(parameters,orientation)
+    structure,beams,nodes = one_sided_branch_model(parameters,orientation)
     states = reshape(parameters[22:end],7,2,3)
     residual = zeros(eltype(parameters),3,4)
     weights = reshape(collect(1.0:12.0),3,4)
     sum(BS.residuals!(residual,structure,states,beams,nodes) .* weights)
+end
+
+function one_sided_pipeline_loss(parameters,orientation)
+    structure,beams,nodes = one_sided_branch_model(parameters,orientation)
+    initial = reshape(parameters[22:end],3,4)
+    solutions,_,_ = structure(initial,beams,nodes)
+    sum(solutions)
 end
 
 @testset "One-sided Branch pullback agrees with ForwardDiff" begin
@@ -68,5 +80,23 @@ end
         forward = ForwardDiff.gradient(objective,parameters)
         @info "one-sided Branch gradient comparison" orientation beam_max_abs=maximum(abs,reverse[1:21]-forward[1:21]) state_max_abs=maximum(abs,reverse[22:end]-forward[22:end])
         @test reverse ≈ forward rtol=1e-8 atol=1e-10
+    end
+end
+
+
+@testset "Full Structure pipeline agrees with ForwardDiff" begin
+    beams = (BS.Beam(35.0,1.0,5.0,0.01;θs=0.2),
+             BS.Beam(45.0,1.0,5.0,-0.01;θs=-0.1),
+             BS.Beam(30.0,1.0,5.0,0.005;θs=0.3))
+    initial = 0.01 .* randn(MersenneTwister(20261002),12)
+    parameters = vcat(collect.(Tuple.(beams))...,initial)
+    for orientation in (:incoming,:outgoing)
+        objective = parameters -> one_sided_pipeline_loss(parameters,orientation)
+        reverse = only(Zygote.gradient(objective,parameters))
+        forward = ForwardDiff.gradient(objective,parameters)
+        beam_difference = abs.(reverse[1:21] .- forward[1:21])
+        beam_index = argmax(beam_difference)
+        @info "full Structure pipeline gradient comparison" orientation beam_max_abs=beam_difference[beam_index] beam=cld(beam_index,7) field=fieldnames(typeof(beams[1]))[mod1(beam_index,7)] reverse_value=reverse[beam_index] forward_value=forward[beam_index] state_max_abs=maximum(abs,reverse[22:end]-forward[22:end])
+        @test all(isapprox.(reverse,forward;rtol=2e-3,atol=1e-5))
     end
 end

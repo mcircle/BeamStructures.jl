@@ -257,7 +257,7 @@ end
 
 function gettangent(beam::B,node,xb,yb,θb,κb::AbstractVector{T}) where{B<:BeamElement,T<:Real} 
     
-    dl = -node.x/beam.l^2 * xb - node.y/beam.l^2 * yb - only(κb * beam.κ0)
+    dl = -node.x/beam.l^2 * xb - node.y/beam.l^2 * yb + only(κb * beam.κ0)
     dκ0 = only(beam.l * κb)
     return Tangent{B}(;l = dl,κ0 = dκ0,θs = θb)
 end 
@@ -266,8 +266,8 @@ function gettangent(beam::B,node,xb,yb,θb,κb::AbstractVector{T}) where{B<:Curv
 
     dl = -node.x/beam.l^2 * xb - node.y/beam.l^2 * yb 
     if length(κb) > 1
-        dl -= reduce(+,beam.κ0 .* κb)
-        dκ0 = -beam.l .* κb
+        dl += reduce(+,beam.κ0 .* κb)
+        dκ0 = beam.l .* κb
     else
         dκ0 = zeros(T,5)
     end
