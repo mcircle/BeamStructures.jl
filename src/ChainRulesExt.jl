@@ -338,7 +338,7 @@ function CRC.rrule(::typeof(initialize_beam),beams::NamedTuple,nodes::NamedTuple
 end 
 
 function forcesbackatend!(∂y,∂beams::CRC.AbstractTangent,ȳ,y,beams::NamedTuple{names,BT},idxs) where{names,BT}
-    isempty(idxs) && return nothing
+    isempty(idxs) && return ∂beams
     y_ = @view y[[1,5,6],2,idxs]
     ∂y_ = @view ∂y[[1,5,6],2,idxs] 
     for (n,b) in enumerate(idxs) 
@@ -350,7 +350,7 @@ function forcesbackatend!(∂y,∂beams::CRC.AbstractTangent,ȳ,y,beams::NamedT
 end 
 
 function forcesbackatstart!(∂y,∂beams::CRC.AbstractTangent,ȳ,y,beams::NamedTuple{names,BT},idxs) where{names,BT}
-    isempty(idxs) && return nothing
+    isempty(idxs) && return ∂beams
     y_ = @view y[[1,5,6],1,idxs]
     ∂y_ = @view ∂y[[1,5,6],1,idxs] 
     for (n,b) in enumerate(idxs) 

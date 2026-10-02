@@ -23,3 +23,50 @@
         @test curved ≈ -reference[1:6,1:6]' * lambda[1:6]
     end
 end
+
+@testset "Empty force orientation preserves beam tangent" begin
+    beam = BS.Beam(25.0,1.0,5.0,0.0)
+    beams = (;Beam_1=beam)
+    tangent = CRC.zero_tangent(beams)
+    state = zeros(7,2,1)
+    state_tangent = zero(state)
+    force_tangent = zeros(3)
+    @test BS.forcesbackatend!(state_tangent,tangent,force_tangent,state,beams,Int[]) === tangent
+    @test BS.forcesbackatstart!(state_tangent,tangent,force_tangent,state,beams,Int[]) === tangent
+end
+
+function one_sided_branch_loss(parameters,orientation)
+    beam(offset) = BS.Beam(parameters[offset:offset+6]...)
+    beams = (Beam_1=beam(1),Beam_2=beam(8),Beam_3=beam(15))
+    if orientation === :incoming
+        nodes = (Node_1=BS.Clamp(0.0,0.0,0.0,0.0,0.0,0.0),
+                 Node_2=BS.Clamp(50.0,0.0,0.0,0.0,0.0,0.0),
+                 Node_3=BS.Branch(25.0,25.0,0.0,0.0,0.0,0.0),
+                 Node_4=BS.Clamp(50.0,50.0,0.0,0.0,0.0,0.0))
+        structure = BS.Structure([0.0 0 1 1;0 0 1 0;1 1 0 0;1 0 0 0])
+    else
+        nodes = (Node_1=BS.Clamp(0.0,0.0,0.0,0.0,0.0,0.0),
+                 Node_2=BS.Branch(25.0,25.0,0.0,0.0,0.0,0.0),
+                 Node_3=BS.Clamp(50.0,0.0,0.0,0.0,0.0,0.0),
+                 Node_4=BS.Clamp(50.0,50.0,0.0,0.0,0.0,0.0))
+        structure = BS.Structure([0.0 0 1 0;0 0 1 1;1 1 0 0;0 1 0 0])
+    end
+    states = reshape(parameters[22:end],7,2,3)
+    residual = zeros(eltype(parameters),3,4)
+    weights = reshape(collect(1.0:12.0),3,4)
+    sum(BS.residuals!(residual,structure,states,beams,nodes) .* weights)
+end
+
+@testset "One-sided Branch pullback agrees with ForwardDiff" begin
+    beams = (BS.Beam(35.0,1.0,5.0,0.01;θs=0.2),
+             BS.Beam(45.0,1.0,5.0,-0.01;θs=-0.1),
+             BS.Beam(30.0,1.0,5.0,0.005;θs=0.3))
+    parameters = vcat(collect.(Tuple.(beams))...,collect(range(-0.2,0.3;length=42)))
+    for orientation in (:incoming,:outgoing)
+        objective = parameters -> one_sided_branch_loss(parameters,orientation)
+        reverse = only(Zygote.gradient(objective,parameters))
+        forward = ForwardDiff.gradient(objective,parameters)
+        @info "one-sided Branch gradient comparison" orientation beam_max_abs=maximum(abs,reverse[1:21]-forward[1:21]) state_max_abs=maximum(abs,reverse[22:end]-forward[22:end])
+        @test reverse ≈ forward rtol=1e-8 atol=1e-10
+    end
+end
